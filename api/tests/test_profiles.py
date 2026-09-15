@@ -1,5 +1,6 @@
 import json
 import re
+import pytest
 from qsprofile import catalog as C
 from qsprofile import load
 from conftest import FIXTURES, ACTIONS, upload
@@ -107,6 +108,24 @@ def test_convert_creates_a_copy_and_is_lossless(client):
                        for md in p["modes"] for m in md["mappings"]]
     assert strip(back) == strip(src)
     assert len(client.get("/profiles").json()) == 3
+
+
+def test_a_name_that_differs_from_the_filename_is_not_reported_at_all(client):
+    """Owner's decision, 2026-09-15: the device loads by filename and never reads the
+    name, so a friendly label beside a short device filename is correct, not a fault.
+    It saves unrewritten, reports nothing at any severity, and exports."""
+    body = {"name": "My Loadout", "csv_filename": "cvcodww2.csv", "modes": [{"name": "M", "mappings": [
+        {"output": "increment_mode", "inputs": ["right_sip"]},
+    ]}]}
+    p = client.post("/profiles", json=body).json()
+    assert p["name"] == "My Loadout" and p["csv_filename"] == "cvcodww2.csv"   # not rewritten
+    r = client.put(f"/profiles/{p['id']}", json=body)
+    assert r.status_code == 200, r.text
+    v = client.get(f"/profiles/{p['id']}/validate").json()
+    assert not [f for f in v["findings"] if "My Loadout" in f["message"]], v["findings"]
+    assert v["errors"] == 0
+    assert client.get(f"/profiles/{p['id']}/export.csv").status_code == 200
+    assert client.get(f"/profiles/{p['id']}/export.xlsx").status_code == 200
 
 
 def test_convert_to_xbox_warns_about_touch(client):
@@ -256,3 +275,129 @@ def test_a_game_action_for_an_unknown_output_is_refused(client):
     assert r.status_code == 200, r.text
     assert [(g["output"], g["action"], g["mode_name"]) for g in r.json()["game_actions"]] == \
            [("right_2", "Fire", None), ("kb_numpad_5", "Map", "M")]
+
+
+# ---------------------------------------------------------------- PATCH nulls (W1)
+@pytest.mark.parametrize("field", ["name", "csv_filename", "console", "firmware", "is_template"])
+def test_patch_with_an_explicit_null_on_a_required_field_is_a_422(client, field):
+    """`{"csv_filename": null}` used to reach the column and fail NOT NULL as a 500.
+    Null is not a reset: PUT is the path that rewrites a whole profile."""
+    p = client.post("/profiles", json={"name": "Nulls", "csv_filename": "nulls.csv"}).json()
+    before = client.get(f"/profiles/{p['id']}").json()
+    r = client.patch(f"/profiles/{p['id']}", json={field: None})
+    assert r.status_code == 422, (field, r.text)
+    assert field in r.text and "omit the field" in r.text
+    assert client.get(f"/profiles/{p['id']}").json()[field] == before[field]
+
+
+def test_patch_names_every_required_field_that_was_sent_as_null(client):
+    p = client.post("/profiles", json={"name": "Nulls", "csv_filename": "nulls2.csv"}).json()
+    r = client.patch(f"/profiles/{p['id']}", json={"name": None, "firmware": None, "game": None})
+    assert r.status_code == 422, r.text
+    assert "name" in r.text and "firmware" in r.text
+
+
+@pytest.mark.parametrize("field", ["game", "notes", "source_url", "template_note"])
+def test_patch_with_a_null_on_a_nullable_field_clears_it(client, field):
+    p = client.post("/profiles", json={"name": "Nulls", "csv_filename": "nulls3.csv",
+                                       field: "something"}).json()
+    assert p[field] == "something"
+    r = client.patch(f"/profiles/{p['id']}", json={field: None})
+    assert r.status_code == 200, (field, r.text)
+    assert client.get(f"/profiles/{p['id']}").json()[field] is None
+
+
+def test_an_empty_patch_changes_nothing(client):
+    p = client.post("/profiles", json={"name": "Nulls", "csv_filename": "nulls4.csv"}).json()
+    r = client.patch(f"/profiles/{p['id']}", json={})
+    assert r.status_code == 200, r.text
+    for k in ("name", "csv_filename", "console", "firmware", "is_template"):
+        assert r.json()[k] == p[k]
+
+
+# ---------------------------------------------------------------- firmware (W19)
+def test_an_unknown_firmware_is_refused_the_same_way_everywhere(client):
+    body = {"name": "FW", "csv_filename": "fw.csv", "firmware": 9999}
+    r = client.post("/profiles", json=body)
+    assert r.status_code == 422 and "Unknown firmware 9999" in r.text and "2373" in r.text
+    p = client.post("/profiles", json={**body, "firmware": 1476}).json()
+    assert p["firmware"] == 1476
+    r = client.patch(f"/profiles/{p['id']}", json={"firmware": 9999})
+    assert r.status_code == 422 and "Unknown firmware 9999" in r.text
+    # a PATCH that leaves firmware out keeps it
+    assert client.patch(f"/profiles/{p['id']}", json={"game": "X"}).json()["firmware"] == 1476
+    r = client.post("/profiles/validate", json={"name": "FW", "csv_filename": "fw.csv", "firmware": 9999})
+    assert r.status_code == 422 and "Unknown firmware 9999" in r.text
+    r = client.get("/prefs", params={"firmware": 9999})
+    assert r.status_code == 422 and "Unknown firmware 9999" in r.text
+
+
+# ---------------------------------------------------------------- library search (N1)
+def test_library_search_treats_the_wildcards_as_ordinary_characters(client):
+    """`_` and `%` are LIKE wildcards; a search for one used to match every profile."""
+    for name, game, fn in (("Fortnite", "Fortnite", "fn.csv"),
+                           ("COD", "Call of Duty", "cod.csv"),
+                           ("Odd", "a_b", "odd.csv"),
+                           ("Pct", "100% aim", "pct.csv")):
+        assert client.post("/profiles", json={"name": name, "game": game,
+                                              "csv_filename": fn}).status_code == 201
+
+    def names(q):
+        return sorted(p["name"] for p in client.get("/profiles", params={"q": q}).json())
+
+    assert names("_") == ["Odd"]
+    assert names("%") == ["Pct"]
+    assert names("a_b") == ["Odd"]
+    assert names("FORT") == ["Fortnite"]          # still case-insensitive
+    assert names("of du") == ["COD"]
+    assert names("zzz") == []
+
+
+# ---------------------------------------------------------------- check / save parity (W18)
+def test_the_live_check_and_the_save_build_the_same_rows(client):
+    """W18: the live check used to have its own copy of the row builder, so the two
+    could drift. The same document through both paths must give the same findings."""
+    doc = {
+        "name": "Parity", "csv_filename": "parity.csv", "firmware": 2373,
+        "modes": [{"name": "Left", "label": "Left joy", "channel": "both", "mappings": [
+            {"output": "increment_mode", "inputs": ["right_sip"]},
+            {"output": "x", "function": "repeat", "params": [5, 2000], "inputs": ["lip"],
+             "comment": "never exported"},
+            {"kind": "preference", "output": "sip_puff_threshold", "value": "55"},
+            {"output": "left_joy_up", "inputs": ["up", "down"]},     # a sequence
+        ]}],
+        "preferences": {"digital_out_1": "1"},
+    }
+    live = client.post("/profiles/validate", json=doc)
+    assert live.status_code == 200, live.text
+    saved = client.post("/profiles", json=doc)
+    assert saved.status_code == 201, saved.text
+    stored = client.get(f"/profiles/{saved.json()['id']}/validate")
+    assert stored.status_code == 200, stored.text
+    assert live.json()["findings"] == stored.json()["findings"]
+    assert live.json()["budget"] == stored.json()["budget"]
+
+
+def test_the_eight_input_cap_is_the_same_on_the_check_and_the_save(client):
+    """A sequence of 9 is a bad request on both paths, and 8 goes through on both."""
+    def doc(n):
+        return {"name": "Cap", "csv_filename": "cap.csv", "modes": [{"name": "M", "mappings": [
+            {"output": "x", "inputs": ["lip"] * n}]}]}
+
+    assert client.post("/profiles/validate", json=doc(9)).status_code == 422
+    assert client.post("/profiles", json=doc(9)).status_code == 422
+    assert client.post("/profiles/validate", json=doc(8)).status_code == 200
+    r = client.post("/profiles", json=doc(8))
+    assert r.status_code == 201, r.text
+    row = client.get(f"/profiles/{r.json()['id']}").json()["modes"][0]["mappings"][0]
+    assert len(row["inputs"]) == 8 and row["is_sequence"] is True
+
+
+def test_the_live_check_persists_nothing(client):
+    """The check path passes no session, so no output row may be created by it."""
+    before = client.get("/catalog").json()["outputs"]
+    r = client.post("/profiles/validate", json={"name": "K", "csv_filename": "k.csv", "modes": [
+        {"name": "M", "mappings": [{"output": "kb_numpad_5", "inputs": ["lip"]}]}]})
+    assert r.status_code == 200, r.text
+    assert client.get("/profiles").json() == []
+    assert client.get("/catalog").json()["outputs"] == before

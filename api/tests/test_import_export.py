@@ -468,3 +468,64 @@ def test_import_findings_come_errors_first_in_mode_and_row_order_and_only_once(c
     for sev in ("error", "warning", "info"):
         block = [(f["mode"], f["row"]) for f in fs if f["severity"] == sev]
         assert block == sorted(block, key=lambda mr: (mr[0] is None, mr[0] or 0, mr[1] is None, mr[1] or 0)), sev
+
+
+def test_a_mode_channel_the_picker_does_not_offer_still_reads_back_and_saves(client, tmp_path):
+    """W4: C3 is stored as the file held it, so an off-catalog channel used to load in
+    the editor and then make every save a 422 — unrelated edits could not be saved."""
+    src = _csv(tmp_path, "m.csv", _mode_block(1, channel="wifi"))
+    r = _post(client, src)
+    assert r.status_code == 201, r.text
+    p = r.json()["profile"]
+    assert p["modes"][0]["channel"] == "wifi"
+    doc = client.get(f"/profiles/{p['id']}").json()
+    assert doc["modes"][0]["channel"] == "wifi"
+    # the regression: the document GET returned must PUT back
+    r = client.put(f"/profiles/{p['id']}", json=doc)
+    assert r.status_code == 200, r.text
+    assert r.json()["modes"][0]["channel"] == "wifi"
+    # core still calls it an error, so export stays refused until it is fixed
+    findings = client.get(f"/profiles/{p['id']}/validate").json()
+    assert findings["errors"] >= 1
+    assert any(f["mode"] == 1 and f["row"] == 3 and f["severity"] == "error"
+               for f in findings["findings"]), findings["findings"]
+    assert client.get(f"/profiles/{p['id']}/export.csv").status_code == 409
+    # and the text rule still holds: a comma in C3 would shift the file's cells
+    bad = dict(doc, modes=[dict(doc["modes"][0], channel="us,b")])
+    assert client.put(f"/profiles/{p['id']}", json=bad).status_code == 422
+
+
+def test_import_with_a_firmware_this_tool_does_not_know_is_refused(client, tmp_path):
+    """W19: one wording for the firmware rule, wherever it is asked."""
+    src = _csv(tmp_path, "m.csv", _mode_block(1))
+    with open(src, "rb") as f:
+        r = client.post("/profiles/import", files={"file": (src.name, f)}, data={"firmware": "9999"})
+    assert r.status_code == 422, r.text
+    assert "Unknown firmware 9999" in r.text and "2373" in r.text and "1476" in r.text
+    assert client.get("/profiles").json() == []
+    with open(src, "rb") as f:
+        r = client.post("/profiles/import", files={"file": (src.name, f)}, data={"firmware": "1476"})
+    assert r.status_code == 201, r.text
+    assert r.json()["profile"]["firmware"] == 1476
+
+
+# ------------------------------------------------------------------- W6: Infrared
+def test_import_refuses_a_file_with_an_infrared_block(client, tmp_path):
+    """An IR block is a valid QuadStick block with no shape in this data model. Storing
+    it would mean re-exporting it as a profile mode, which is the header the firmware
+    dispatches on, so the import is refused whole rather than silently damaging it."""
+    src = tmp_path / "ir.csv"
+    src.write_bytes(b"QuadStick Configuration,Version 1.4,,IR test\r\n"
+                    b"Profile Name,,Left joy,\r\n"
+                    b"ir.csv,,Normal,\r\n"
+                    b"Output or Function,Function,usb,\r\n"
+                    b"cross,normal,lip,\r\n"
+                    b"\r\n"
+                    b"Infrared,,TV power,\r\n"
+                    b"ir_code,,0x20DF10EF,\r\n"
+                    b"\r\n")
+    with open(src, "rb") as f:
+        r = client.post("/profiles/import", files={"file": ("ir.csv", f)})
+    assert r.status_code == 422, r.text
+    assert "Infrared" in r.text
+    assert client.get("/profiles").json() == []              # nothing was stored

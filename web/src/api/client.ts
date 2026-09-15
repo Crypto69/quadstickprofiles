@@ -1,10 +1,22 @@
 // Typed client for the FastAPI service. Every path is relative, so the same build
 // works behind the nginx proxy and against the Vite dev proxy.
 import type {
-  Catalog, ConvertResult, ImportResult, Prefs, Profile, ProfileCreate, ProfileSummary, Validation,
+  Catalog, ConvertResult, ImportResult, Prefs, Profile, ProfileCreate, ProfilePatch,
+  ProfileSummary, Validation,
 } from './types'
 
 export const API_BASE = '/api'
+
+/**
+ * Sent on every request so the API can tell the app apart from a cross-site form
+ * post (api/app/csrf.py). A custom header cannot be set by a `<form>`, an `<img>`
+ * or a `<script>` tag, which is the whole class of "simple" requests that reach
+ * the API without a CORS preflight. Not a secret and not a token — there is no
+ * login (single-user), so this plus the server's Origin check *is* the CSRF
+ * defence. Change it here and in api/app/csrf.py together.
+ */
+export const REQUESTED_WITH_HEADER = 'X-Requested-With'
+export const REQUESTED_WITH = 'QuadStickProfileStudio'
 
 /** An API error that carries the validation findings, so the UI can say *why*. */
 export class ApiError extends Error {
@@ -66,7 +78,12 @@ async function raise(res: Response): Promise<never> {
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(`${API_BASE}${path}`, init)
+  // Headers, not a spread: an init may already carry Content-Type (json()) and a
+  // FormData body must keep its browser-generated multipart boundary, so never
+  // set Content-Type here.
+  const headers = new Headers(init?.headers)
+  headers.set(REQUESTED_WITH_HEADER, REQUESTED_WITH)
+  const res = await fetch(`${API_BASE}${path}`, { ...init, headers })
   if (!res.ok) await raise(res)
   if (res.status === 204) return undefined as T
   return (await res.json()) as T
@@ -80,8 +97,24 @@ function json(method: string, body: unknown): RequestInit {
 export interface Download {
   blob: Blob
   filename: string
-  /** Where the api container also wrote it (the exports/ share). */
+  /**
+   * Where the api container also wrote it (the exports/ share), already decoded.
+   * The server percent-encodes it (api/app/headers.py) because header values are
+   * Latin-1 and a home directory can be called Łukasz; an ASCII path is unchanged.
+   */
   exportPath: string | null
+}
+
+/** Undo the server's percent-encoding of `X-Export-Path`. A malformed value is
+ *  shown as-is rather than throwing: the export itself already succeeded. */
+function exportPathFrom(res: Response): string | null {
+  const raw = res.headers.get('X-Export-Path')
+  if (raw === null) return null
+  try {
+    return decodeURIComponent(raw)
+  } catch {
+    return raw
+  }
 }
 
 function filenameFrom(res: Response, fallback: string) {
@@ -95,7 +128,7 @@ async function download(path: string, fallback: string): Promise<Download> {
   return {
     blob: await res.blob(),
     filename: filenameFrom(res, fallback),
-    exportPath: res.headers.get('X-Export-Path'),
+    exportPath: exportPathFrom(res),
   }
 }
 
@@ -122,7 +155,7 @@ export const api = {
   replaceProfile: (id: number, body: ProfileCreate) =>
     request<Profile>(`/profiles/${id}`, json('PUT', body)),
 
-  patchProfile: (id: number, body: Partial<ProfileCreate>) =>
+  patchProfile: (id: number, body: ProfilePatch) =>
     request<Profile>(`/profiles/${id}`, json('PATCH', body)),
 
   deleteProfile: (id: number) => request<void>(`/profiles/${id}`, { method: 'DELETE' }),

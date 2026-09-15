@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Query, Response
 from fastapi.responses import HTMLResponse
-from sqlalchemy import select, func
+from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 from qsprofile import load, convert, write_csv, write_xlsx, render, render_summary
@@ -15,11 +15,13 @@ from qsprofile import catalog as C
 from qsprofile.catalog import check_csv_filename
 from qsprofile.validate import budget as core_budget
 from .. import models as M, schemas as S
-from ..bridge import (profile_from_config, fill_profile_from_config, config_from_profile,
+from ..bridge import (profile_from_config, config_from_profile,
                       actions_for_profile, findings_for_profile, has_errors, ensure_output,
-                      check_preference, ROW_OFFSET)
+                      ROW_OFFSET)
 from ..db import get_session
+from ..headers import export_path_header
 from ..settings import settings
+from ..uploads import read_capped
 
 router = APIRouter(prefix="/profiles", tags=["profiles"])
 
@@ -37,6 +39,14 @@ def _get(db: Session, profile_id: int) -> M.Profile:
 
 def _iso(dt):
     return dt.isoformat() if dt else None
+
+
+def _stem(csv_filename: str) -> str:
+    """The name that belongs with a `.csv` filename: its stem. The device loads by
+    filename and never reads the name, so the names this server invents (a duplicate,
+    a conversion) take the stem of the file they will be written as — the pair the
+    owner can match up on the stick. `csv_filename_for_name(_stem(f)) == f`."""
+    return str(csv_filename or "").rsplit(".", 1)[0]
 
 
 def _touch(p: M.Profile):
@@ -114,28 +124,41 @@ def _out(p: M.Profile) -> S.ProfileOut:
     )
 
 
-def _apply_children(db: Session, p: M.Profile, body: S.ProfileCreate):
-    if p.modes:                       # delete first so (profile_id, position) can be reused
-        p.modes = []
-        db.flush()
-    for pos, mode in enumerate(body.modes, start=1):
+def _modes_from_body(db: Session | None, modes: list[S.ModeIn]) -> list[M.Mode]:
+    """The mode / mapping / input rows a request body describes. One builder for the
+    two callers — the save (PUT, POST) and the live check (POST /profiles/validate) —
+    so what the editor is told about a document is what saving it would store.
+    `db` is None on the live path: nothing is looked up and nothing is persisted.
+    The keyword rules are already applied by the schema (MappingIn), including the
+    8-input cap and the preference-key check."""
+    out = []
+    for pos, mode in enumerate(modes, start=1):
         # C1 may be blank on the device (`Profile Name,,,`): an explicit '' stays '', so
         # GET -> PUT -> export is byte-identical; only an absent label falls back to name.
         m = M.Mode(position=pos, name=mode.name, channel=mode.channel,
                    label=mode.label if mode.label is not None else mode.name)
+        m.mappings = []
         for i, mp in enumerate(mode.mappings):
             if mp.kind == "preference":
-                check_preference(mp.output)
                 m.mappings.append(M.Mapping(row_order=i, kind="preference", pref_key=mp.output,
                                             value=mp.value, function=None, column_b=mp.function or None,
                                             params=[], comment=mp.comment))
                 continue
-            ensure_output(db, mp.output)
+            if db is not None:        # an output the seed does not hold yet (kb_* / ir_*)
+                ensure_output(db, mp.output)
             row = M.Mapping(row_order=i, kind="mapping", output=mp.output, function=mp.function or None,
                             params=list(mp.params), comment=mp.comment)
             row.inputs = [M.MappingInput(seq=s, input=inp) for s, inp in enumerate(mp.inputs)]
             m.mappings.append(row)
-        p.modes.append(m)
+        out.append(m)
+    return out
+
+
+def _apply_children(db: Session, p: M.Profile, body: S.ProfileCreate):
+    if p.modes:                       # delete first so (profile_id, position) can be reused
+        p.modes = []
+        db.flush()
+    p.modes = _modes_from_body(db, body.modes)
     p.preferences = [M.Preference(scope="profile", key=k, value=v) for k, v in body.preferences.items()]
     _apply_game_actions(p, body.game_actions)
     _apply_input_names(p, body.input_names)
@@ -151,6 +174,15 @@ def _apply_input_names(p: M.Profile, names: dict[str, str]):
     p.input_names = [M.InputName(input=k, name=v) for k, v in names.items() if v]
 
 
+def _copy_labels(src: M.Profile, p: M.Profile):
+    """The two label sets a copy must carry across by hand: the game-action names and
+    the renamed inputs. Neither is part of the Config, so profile_from_config cannot
+    bring them; everything else (modes, rows, comments, preferences) already is."""
+    _apply_game_actions(p, [S.GameActionIn(output=g.output, action=g.action, mode_name=g.mode_name)
+                            for g in src.game_actions])
+    _apply_input_names(p, {n.input: n.name for n in src.input_names})
+
+
 # ---------------------------------------------------------------- list / create / read
 @router.get("", response_model=list[S.ProfileSummary])
 def list_profiles(q: str | None = Query(None, description="search by game or name"),
@@ -162,8 +194,10 @@ def list_profiles(q: str | None = Query(None, description="search by game or nam
             .where(M.Profile.is_template.is_(templates))
             .order_by(M.Profile.updated_at.desc(), M.Profile.id.desc()))
     if q:
-        like = f"%{q}%"
-        stmt = stmt.where(func.lower(M.Profile.game).like(like.lower()) | func.lower(M.Profile.name).like(like.lower()))
+        # autoescape, or a search for `_` or `%` would be read as a LIKE wildcard
+        # and match every profile instead of the one whose name holds that character
+        stmt = stmt.where(M.Profile.game.icontains(q, autoescape=True)
+                          | M.Profile.name.icontains(q, autoescape=True))
     out = []
     for p in db.scalars(stmt).all():
         out.append(S.ProfileSummary(
@@ -236,7 +270,7 @@ async def import_profile(file: UploadFile = File(...), game: str | None = Form(N
     suffix = Path(file.filename or "").suffix.lower()
     if suffix not in (".xlsx", ".csv"):
         raise HTTPException(415, "Upload a .xlsx (Google Sheet download) or a device .csv")
-    data = await file.read()
+    data = await read_capped(file)
     with tempfile.TemporaryDirectory() as td:
         tmp = Path(td) / (Path(file.filename).name or f"upload{suffix}")
         tmp.write_bytes(data)
@@ -244,9 +278,8 @@ async def import_profile(file: UploadFile = File(...), game: str | None = Form(N
             cfg, problems = load(str(tmp))
         except Exception as e:                       # openpyxl / csv failures
             raise HTTPException(422, f"Could not read {file.filename}: {e}")
-    if firmware not in C.FIRMWARE_VERSIONS:
-        raise HTTPException(422, f"Unknown firmware {firmware}; known: "
-                                 f"{', '.join(map(str, C.FIRMWARE_VERSIONS))}")
+    if problem := C.check_firmware(firmware):
+        raise HTTPException(422, problem)
     # the name override is typed, not read from the file, so it follows the same line-1
     # rule as the JSON bodies (a line break or non-ASCII is a 422; a comma only warns),
     # and it goes onto the Config before the findings, so they describe what is stored
@@ -277,10 +310,14 @@ async def import_profile(file: UploadFile = File(...), game: str | None = Form(N
 
 
 def _unstorable(cfg) -> list[str]:
-    """Why the database could not hold this Config: more modes than the position
-    CHECK allows, a mapping whose function is not in function_catalog (FK), or a
-    filename the profiles CHECK rejects. Each is also a core finding."""
+    """Why the database could not hold this Config: an Infrared block the data model
+    has no shape for, more modes than the position CHECK allows, a mapping whose
+    function is not in function_catalog (FK), or a filename the profiles CHECK
+    rejects. Each is also a core finding."""
     out = []
+    if cfg.infrared_blocks:
+        out.append(f"the file contains {cfg.infrared_blocks} Infrared block(s), which this "
+                   "tool cannot store; importing it would re-export them as profile modes")
     if len(cfg.modes) > C.MAX_MODES:
         out.append(f"{len(cfg.modes)} modes; the QuadStick allows at most {C.MAX_MODES}")
     if problem := check_csv_filename(cfg.filename):
@@ -313,24 +350,7 @@ def validate_document(body: S.ValidateIn):
     so live checks never touch the database."""
     p = M.Profile(name=body.name, csv_filename=body.csv_filename, game=body.game, console=body.console,
                   firmware=body.firmware, format_version="Version 1.4")
-    p.modes = []
-    for pos, mode in enumerate(body.modes, start=1):
-        # C1 may be blank on the device (`Profile Name,,,`): an explicit '' stays '', so
-        # GET -> PUT -> export is byte-identical; only an absent label falls back to name.
-        m = M.Mode(position=pos, name=mode.name, channel=mode.channel,
-                   label=mode.label if mode.label is not None else mode.name)
-        m.mappings = []
-        for i, mp in enumerate(mode.mappings):
-            if mp.kind == "preference":
-                m.mappings.append(M.Mapping(row_order=i, kind="preference", pref_key=mp.output,
-                                            value=mp.value, function=None, column_b=mp.function or None,
-                                            params=[], comment=mp.comment))
-                continue
-            row = M.Mapping(row_order=i, kind="mapping", output=mp.output, function=mp.function or None,
-                            params=list(mp.params), comment=mp.comment)
-            row.inputs = [M.MappingInput(seq=s, input=inp) for s, inp in enumerate(mp.inputs)]
-            m.mappings.append(row)
-        p.modes.append(m)
+    p.modes = _modes_from_body(None, body.modes)
     p.preferences = [M.Preference(scope="profile", key=k, value=v) for k, v in body.preferences.items()]
     return _validation(p)
 
@@ -350,7 +370,7 @@ def _export(db, profile_id, kind, filename):
     media = "text/csv" if kind == "csv" else "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     return Response(data, media_type=media,
                     headers={"Content-Disposition": f'attachment; filename="{out.name}"',
-                             "X-Export-Path": str(out)})
+                             "X-Export-Path": export_path_header(out)})
 
 
 def write_atomically(out: Path, writer) -> bytes:
@@ -382,7 +402,9 @@ def _check_export_name(fname: str):
 
 def _export_target(name: str) -> Path:
     """The file inside `exports/` an export may write. Resolved and checked to sit
-    directly in the exports directory, so this is the path `X-Export-Path` may show."""
+    directly in the exports directory. `X-Export-Path` shows the percent-encoded
+    form of this path: header values must be Latin-1, and the exports directory can
+    sit under a home folder whose name is not."""
     exports = settings.exports_dir.resolve()
     exports.mkdir(parents=True, exist_ok=True)
     out = (exports / name).resolve()
@@ -420,10 +442,8 @@ def create_from_template(template_id: int, body: S.FromTemplateIn, db: Session =
     p.notes = f"Started from the '{src.name}' starter profile"
     p.source_url = None
     p.is_template = False
-    p.preferences = [M.Preference(scope="profile", key=x.key, value=x.value) for x in src.preferences]
-    _apply_game_actions(p, [S.GameActionIn(output=g.output, action=g.action, mode_name=g.mode_name)
-                            for g in src.game_actions])
-    _apply_input_names(p, {n.input: n.name for n in src.input_names})
+    # the preferences came across with the Config; only the labels need copying
+    _copy_labels(src, p)
     db.add(p)
     db.commit()
     return _out(_get(db, p.id))
@@ -436,23 +456,30 @@ def duplicate_profile(profile_id: int, name: str | None = Query(None, descriptio
                       db: Session = Depends(get_session)):
     """Copy a profile, including its per-mode preference override rows and comments.
     A copy needs its own `.csv` filename, because the device picks files by filename;
-    the default appends `_copy` to the stem."""
+    the default appends `_copy` to the stem, and the default name is that stem, so the
+    two agree on the stick (`cvcodww2_copy` / `cvcodww2_copy.csv`). Both stay
+    independently settable."""
     src = _get(db, profile_id)
     if csv_filename and (problem := check_csv_filename(csv_filename)):
         raise HTTPException(422, f"csv_filename: {problem}")
     if name and (problem := C.unsafe_text(name.replace(",", ""))):    # line 1: a comma only warns
         raise HTTPException(422, f"name: '{name[:30]}' {problem}")
-    fname = csv_filename or f"{Path(src.csv_filename).stem}_copy.csv"
+    fname = csv_filename or C.derived_csv_filename(src.csv_filename, "copy")
+    # the derived name is the server's own invention and the user never gets to shorten
+    # it, so check it here rather than letting the profiles CHECK turn it into a 500
+    if problem := check_csv_filename(fname):
+        raise HTTPException(422, f"csv_filename: {problem}")
     cfg = config_from_profile(src)
-    cfg.name = name or f"{src.name} (copy)"
+    # the default name is the filename's own stem, so name and file agree: the device
+    # loads by filename and never reads the name, and a pair that disagrees is exactly
+    # what makes a stick full of copies unreadable
+    cfg.name = name or _stem(fname)
     cfg.filename = fname
     p = profile_from_config(db, cfg, game=src.game, firmware=src.firmware)
     p.notes = src.notes
     p.source_url = src.source_url
     p.is_template, p.template_note = src.is_template, src.template_note
-    _apply_game_actions(p, [S.GameActionIn(output=g.output, action=g.action, mode_name=g.mode_name)
-                            for g in src.game_actions])
-    _apply_input_names(p, {n.input: n.name for n in src.input_names})
+    _copy_labels(src, p)
     db.add(p)
     db.commit()
     return _out(_get(db, p.id))
@@ -462,7 +489,9 @@ def duplicate_profile(profile_id: int, name: str | None = Query(None, descriptio
 @router.post("/{profile_id}/convert", response_model=S.ConvertOut, status_code=201)
 def convert_profile(profile_id: int, body: S.ConvertIn, db: Session = Depends(get_session)):
     """Create a copy under the other console's naming set. Outputs are canonical,
-    so this is a rename at export time plus notes for anything that won't carry across."""
+    so this is a rename at export time plus notes for anything that won't carry across.
+    The default filename appends `_ps` / `_xbox` and the default name is that stem, so
+    the pair agrees on the stick; `name` and `csv_filename` still override either."""
     src = _get(db, profile_id)
     cfg = config_from_profile(src)
     findings = findings_for_profile(src, cfg)
@@ -470,18 +499,18 @@ def convert_profile(profile_id: int, body: S.ConvertIn, db: Session = Depends(ge
         raise HTTPException(409, detail={"message": "Convert refused: fix the validation errors first",
                                          "validation": S.ValidationOut.from_findings(findings).model_dump()})
     new_cfg, notes = convert(cfg, body.target)
-    stem = Path(src.csv_filename).stem
     suffix = "ps" if body.target == "playstation" else "xbox"
-    suggested = body.csv_filename or f"{stem}_{suffix}.csv"
-    label = "PlayStation" if body.target == "playstation" else "Xbox"
-    new_cfg.name = body.name or f"{src.name} ({label})"
+    suggested = body.csv_filename or C.derived_csv_filename(src.csv_filename, suffix)
+    # as in duplicate: a server-derived name must pass the device's rule before insert
+    if problem := check_csv_filename(suggested):
+        raise HTTPException(422, f"csv_filename: {problem}")
+    # as in duplicate, the default name is the suggested filename's stem so the two agree
+    new_cfg.name = body.name or _stem(suggested)
     new_cfg.filename = suggested
     p = profile_from_config(db, new_cfg, game=src.game, firmware=src.firmware)
     p.notes = src.notes
     p.source_url = None
-    _apply_game_actions(p, [S.GameActionIn(output=g.output, action=g.action, mode_name=g.mode_name)
-                            for g in src.game_actions])
-    _apply_input_names(p, {n.input: n.name for n in src.input_names})
+    _copy_labels(src, p)
     db.add(p)
     db.commit()
     return S.ConvertOut(profile=_out(_get(db, p.id)), notes=[S.Finding.from_tuple(n) for n in notes],

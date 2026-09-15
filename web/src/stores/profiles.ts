@@ -46,16 +46,28 @@ export const useProfilesStore = defineStore('profiles', () => {
   const blocked = ref<Blocked | null>(null) // an export refused for validation errors
   const lastImport = ref<ImportResult | null>(null) // drives the import-findings dialog
 
+  /**
+   * Generation counter. Typing in the search box, and every action that reloads the
+   * list afterwards, can leave two requests in flight; a slow older answer landing
+   * last would show results for a query the user has already moved on from — or
+   * raise a banner for a search that has since succeeded. Only the newest may write.
+   */
+  let loadSeq = 0
+
   async function load(opts?: { q?: string }) {
+    const seq = ++loadSeq
     loading.value = true
     error.value = null
     try {
       const q = opts?.q ?? search.value
-      profiles.value = await api.listProfiles({ q: q || undefined, validate: true })
+      const list = await api.listProfiles({ q: q || undefined, validate: true })
+      if (seq !== loadSeq) return
+      profiles.value = list
     } catch (e) {
+      if (seq !== loadSeq) return
       error.value = describe(e)
     } finally {
-      loading.value = false
+      if (seq === loadSeq) loading.value = false
     }
   }
 
@@ -188,6 +200,12 @@ export const useProfilesStore = defineStore('profiles', () => {
     blocked.value = null
   }
 
+  /** Clear the last failure. Opening a dialog that shows errors inside itself calls
+   *  this, so a failure left over from an earlier action is not read as this one's. */
+  function dismissError() {
+    error.value = null
+  }
+
   async function duplicate(id: number, opts?: { name?: string; csv_filename?: string }) {
     const p = await act(id, () => api.duplicateProfile(id, opts))
     if (p) await load()
@@ -198,6 +216,20 @@ export const useProfilesStore = defineStore('profiles', () => {
     const r = await act(id, () => api.convertProfile(id, { target, ...opts }))
     if (r) await load()
     return r
+  }
+
+  /**
+   * Change a profile's name and the filename the QuadStick loads it by, and nothing
+   * else. PATCH, not PUT: the device goes by the filename, so this is the edit the
+   * owner reaches for most, and PUT would mean fetching and resending every mode and
+   * preference just to change two strings — with the whole document at risk if the
+   * library's copy were stale. PATCH ignores `modes` and `preferences` by design
+   * (see ProfilePatch), which is exactly the guarantee wanted here.
+   */
+  async function rename(id: number, body: { name: string; csv_filename: string }) {
+    const p = await act(id, () => api.patchProfile(id, body))
+    if (p) await load()
+    return p
   }
 
   async function remove(id: number) {
@@ -268,8 +300,8 @@ export const useProfilesStore = defineStore('profiles', () => {
     consoleFilter, emulationFilter, visible, filtering, consoleCounts, emulationCounts,
     presentConsoles, presentEmulations,
     byId, health, canExport,
-    load, loadTemplates, importFile, dismissImport, dismissBlocked, duplicate, convert,
-    remove, create, createFromTemplate, exportFile, validate, get,
+    load, loadTemplates, importFile, dismissImport, dismissBlocked, dismissError, duplicate, convert,
+    rename, remove, create, createFromTemplate, exportFile, validate, get,
     toggleConsole, toggleEmulation, clearFilters,
   }
 })

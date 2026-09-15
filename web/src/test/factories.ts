@@ -231,6 +231,40 @@ export function noContent(): StubResponse {
   return { status: 204, body: '' }
 }
 
+/** A 404 with the API's `detail` string. */
+export function notFound(message = 'Profile not found'): StubResponse {
+  return {
+    status: 404,
+    body: JSON.stringify({ detail: message }),
+    headers: { 'Content-Type': 'application/json' },
+  }
+}
+
+/**
+ * A fetch whose answers the test releases itself, in any order — for the race
+ * tests, where what matters is which response lands last, not which was sent last.
+ */
+export function deferredFetch() {
+  const calls: { key: string; release: (body: unknown, status?: number) => void }[] = []
+  const fetch = vi.fn(
+    (input: RequestInfo | URL, init?: RequestInit) =>
+      new Promise<Response>((resolve) => {
+        const url = typeof input === 'string' ? input : input.toString()
+        calls.push({
+          key: `${init?.method ?? 'GET'} ${url}`,
+          release: (body, status = 200) =>
+            resolve(
+              new Response(status === 204 ? null : JSON.stringify(body), {
+                status,
+                headers: { 'Content-Type': 'application/json' },
+              }),
+            ),
+        })
+      }),
+  )
+  return { fetch, calls }
+}
+
 /** A profile with modes, for the editor tests. */
 export function editableProfile(over: Partial<Profile> = {}): Profile {
   return profile({

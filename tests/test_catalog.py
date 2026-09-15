@@ -135,3 +135,87 @@ def test_firmware_phrase_matches_the_set_hidden_drive_modes_used():
     assert C.firmware_phrase(None) == f" on firmware {C.DEFAULT_FIRMWARE}"
     phrase = C.firmware_phrase(9999)
     assert phrase.startswith(", assuming firmware 2373") and "9999" in phrase
+
+
+# ---------------------------------------------------------------- derived filenames (W2)
+def test_a_derived_filename_keeps_a_short_stem_as_it_is():
+    assert C.derived_csv_filename("ddfortnite.csv", "copy") == "ddfortnite_copy.csv"
+    assert C.derived_csv_filename("cod.csv", "ps") == "cod_ps.csv"
+    assert C.derived_csv_filename("cod.csv", "xbox") == "cod_xbox.csv"
+
+
+@pytest.mark.parametrize("suffix", ["copy", "ps", "xbox"])
+def test_a_derived_filename_never_exceeds_what_the_device_loads(suffix):
+    """The stem is cut, not the suffix: the server invents these names and the user
+    never gets a chance to shorten them."""
+    name = C.derived_csv_filename("a" * 27 + ".csv", suffix)
+    assert len(name) <= C.MAX_CSV_FILENAME_CHARS
+    assert name.endswith(f"_{suffix}.csv")
+    assert C.check_csv_filename(name) is None
+
+
+def test_a_derived_filename_is_lowercased_and_never_ends_in_a_separator():
+    assert C.derived_csv_filename("MyGame.CSV", "copy") == "mygame_copy.csv"
+    # the cut must not leave `stem__copy.csv` or `stem-_copy.csv`
+    assert C.derived_csv_filename("a" * 20 + "_____.csv", "copy") == "a" * 20 + "_copy.csv"
+    assert C.derived_csv_filename(".csv", "copy") == "profile_copy.csv"
+    assert C.derived_csv_filename("", "copy") == "profile_copy.csv"
+
+
+# ------------------------------------------------- name -> filename (the shared rule)
+def test_a_name_becomes_the_filename_the_device_will_show():
+    assert C.csv_filename_for_name("Call of Duty") == "call_of_duty.csv"
+    assert C.csv_filename_for_name("MyGame") == "mygame.csv"
+    # a name that is already a filename stem comes back unchanged
+    assert C.csv_filename_for_name("ddfortnite") == "ddfortnite.csv"
+
+
+def test_the_name_rule_keeps_underscores_and_dashes():
+    """check_csv_filename permits _ and -, so the rule must keep them: an earlier
+    frontend slug stripped both and invented a different name for the same profile."""
+    assert C.csv_filename_for_name("cvcodww2_copy") == "cvcodww2_copy.csv"
+    assert C.csv_filename_for_name("My_Game-2") == "my_game-2.csv"
+    assert C.csv_filename_for_name("cod_ps") == "cod_ps.csv"
+
+
+def test_the_name_rule_collapses_anything_else_to_one_underscore():
+    assert C.csv_filename_for_name("Call of  Duty: WWII!") == "call_of_duty_wwii.csv"
+    assert C.csv_filename_for_name("a / b \\ c") == "a_b_c.csv"
+    assert C.csv_filename_for_name("  spaced  ") == "spaced.csv"
+    assert C.csv_filename_for_name("--dash--") == "dash.csv"
+    assert C.csv_filename_for_name("...dots...") == "dots.csv"
+
+
+def test_a_long_name_is_cut_to_what_the_device_loads():
+    name = C.csv_filename_for_name("Call of Duty Advanced Warfare XBox One Remastered")
+    assert len(name) <= C.MAX_CSV_FILENAME_CHARS
+    assert C.check_csv_filename(name) is None
+    # the cut never leaves a trailing separator
+    assert C.csv_filename_for_name("a" * 20 + " " * 3 + "b" * 20) == "a" * 20 + "_" + "b" * 6 + ".csv"
+    assert not C.csv_filename_for_name("a" * 26 + " tail").rsplit(".", 1)[0].endswith("_")
+
+
+def test_a_name_with_nothing_usable_falls_back_to_profile():
+    for empty in ("", None, "   ", "!!!", "...", "___", "😀"):
+        assert C.csv_filename_for_name(empty) == "profile.csv", empty
+
+
+@pytest.mark.parametrize("name", [
+    "Call of Duty", "ddfortnite", "My_Game-2", "a" * 60, "!!!", "", "Grand Theft Auto V",
+    "x,y", "ü ber", "Mode 1 / Mode 2", "-" * 40, "9", "CAPS LOCK NAME",
+])
+def test_every_derived_filename_is_one_the_device_loads(name):
+    assert C.check_csv_filename(C.csv_filename_for_name(name)) is None
+
+
+# ---------------------------------------------------------------- firmware (W19)
+@pytest.mark.parametrize("fw", C.FIRMWARE_VERSIONS)
+def test_a_known_firmware_has_no_complaint(fw):
+    assert C.check_firmware(fw) is None
+
+
+def test_an_unknown_firmware_says_which_versions_are_known():
+    msg = C.check_firmware(9999)
+    assert "Unknown firmware 9999" in msg
+    assert "2373" in msg and "1476" in msg
+    assert C.check_firmware(None) is not None

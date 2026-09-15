@@ -3,13 +3,15 @@ catalogs here so the API can never store a name the device would reject."""
 from typing import Literal
 from pydantic import BaseModel, Field, field_validator, model_validator
 from qsprofile import catalog as C
-from qsprofile.catalog import check_csv_filename, unsafe_text
+from qsprofile.catalog import check_csv_filename, check_firmware, unsafe_text
 from .catalog_seed import output_family_group
 
 Console = Literal["playstation", "xbox"]
 Severity = Literal["error", "warning", "info"]
-# a mode's C3 cell: which link its outputs go out on. `both` and `none` are what the
-# firmware accepts too; the validator warns when an output cannot reach its link.
+# a mode's C3 cell: which link its outputs go out on. This is the editor's picker
+# vocabulary (it is what `web/src/api/types.ts` mirrors), not a rule the request bodies
+# enforce — ModeIn takes any word, because an import stores C3 verbatim and what GET
+# returns must PUT back. The validator reports anything else as an error.
 Channel = Literal["none", "usb", "bluetooth", "both"]
 
 
@@ -38,6 +40,14 @@ def _check_filename(v: str) -> str:
     problem = check_csv_filename(v)
     if problem:
         raise ValueError(f"csv_filename: {problem}")
+    return v
+
+
+def _check_firmware(v):
+    """The one firmware rule, from the catalog (check_firmware), raised as a 422 here
+    and as an HTTPException in the two routers that read it off a query or a form."""
+    if problem := check_firmware(v):
+        raise ValueError(problem)
     return v
 
 
@@ -183,7 +193,9 @@ class MappingIn(BaseModel):
     # has_errors), not a 422 it can only show as "request failed".
     params: list[int | float | str] = Field(default_factory=list)
     inputs: list[str] = Field(default_factory=list, max_length=8)
-    comment: str | None = None                # never exported, so free text
+    comment: str | None = None                # never reaches the device .csv, so D4 (_safe) does not
+                                              # apply; it is written to column K of the .xlsx export
+                                              # (as text, never a formula) and read back on import
 
     _text = field_validator("value")(_safe)   # the override value is a cell in the file
 
@@ -256,10 +268,14 @@ class ModeIn(BaseModel):
     name: str = Field(min_length=1)
     label: str | None = None                  # C1. Absent: the name stands in. "": the C1 cell is
                                               # blank on the device, and stays blank (see profiles.py)
-    channel: Channel = "usb"
+    # not the `Channel` Literal: an import stores C3 as the file held it, and what GET
+    # returns must PUT back, or one off-catalog channel would freeze every later save
+    # of the profile. core's validate() errors on an unknown channel and export is
+    # blocked by it; the text rule still applies, so a comma in C3 can't reach write_csv.
+    channel: str = "usb"
     mappings: list[MappingIn] = Field(default_factory=list)
 
-    _text = field_validator("name", "label")(_safe)
+    _text = field_validator("name", "label", "channel")(_safe)
 
 
 class ModeOut(BaseModel):
@@ -310,13 +326,7 @@ class ProfileMeta(BaseModel):
 
     _fn = field_validator("csv_filename")(_check_filename)
     _line1 = field_validator("name", "source_url")(_line1)
-
-    @field_validator("firmware")
-    @classmethod
-    def _firmware(cls, v):
-        if v not in C.FIRMWARE_VERSIONS:
-            raise ValueError(f"Unknown firmware {v}; known: {', '.join(map(str, C.FIRMWARE_VERSIONS))}")
-        return v
+    _fw = field_validator("firmware")(_check_firmware)
 
 
 class ProfileCreate(ProfileMeta):
@@ -346,6 +356,13 @@ class ProfileReplace(ProfileCreate):
     """PUT body: the whole document; children are replaced."""
 
 
+# PATCH fields whose column is NOT NULL: an explicit `null` there is a 422, not a
+# reset (decision 2026-09-15). Omitting the field leaves it unchanged; PUT is the
+# path that rewrites a whole profile. The nullable columns (game, notes, source_url,
+# template_note) and the child collections still take null, which clears them.
+_NOT_NULLABLE = ("name", "csv_filename", "console", "firmware", "is_template")
+
+
 class ProfilePatch(BaseModel):
     """PATCH body: metadata only, all optional."""
     name: str | None = Field(default=None, min_length=1)
@@ -365,9 +382,9 @@ class ProfilePatch(BaseModel):
     @field_validator("firmware")
     @classmethod
     def _firmware(cls, v):
-        if v is not None and v not in C.FIRMWARE_VERSIONS:
-            raise ValueError(f"Unknown firmware {v}; known: {', '.join(map(str, C.FIRMWARE_VERSIONS))}")
-        return v
+        # None is caught by _no_null_where_the_column_is_not_null, with a message that
+        # says to omit the field; check_firmware(None) would only say "Unknown firmware None"
+        return None if v is None else _check_firmware(v)
 
     @field_validator("csv_filename")
     @classmethod
@@ -381,6 +398,16 @@ class ProfilePatch(BaseModel):
             if C.classify_input(i) is None:
                 raise ValueError(f"Unknown input '{i}'")
         return v
+
+    @model_validator(mode="after")
+    def _no_null_where_the_column_is_not_null(self):
+        """`{"csv_filename": null}` used to reach setattr and fail the NOT NULL
+        constraint as a 500. A null on one of those columns is a bad request."""
+        nulls = [k for k in _NOT_NULLABLE if k in self.model_fields_set and getattr(self, k) is None]
+        if nulls:
+            raise ValueError(f"{', '.join(nulls)}: null is not allowed; "
+                             f"omit the field to leave it unchanged")
+        return self
 
 
 class GameActionOut(BaseModel):
@@ -477,12 +504,7 @@ class ValidateIn(BaseModel):
     modes: list["ModeDraft"] = Field(default_factory=list)
     preferences: dict[str, str] = Field(default_factory=dict)
 
-    @field_validator("firmware")
-    @classmethod
-    def _firmware(cls, v):
-        if v not in C.FIRMWARE_VERSIONS:
-            raise ValueError(f"Unknown firmware {v}; known: {', '.join(map(str, C.FIRMWARE_VERSIONS))}")
-        return v
+    _fw = field_validator("firmware")(_check_firmware)
 
 
 class MappingDraft(MappingIn):

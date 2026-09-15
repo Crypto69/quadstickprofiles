@@ -8,7 +8,8 @@ from .catalog import (classify_input, output_label, MODE_CHANGE_OUTPUTS,
                      FUNCTIONS, all_mouthpiece_inputs, LEGACY_INPUTS, PREFERENCES,
                      MAX_MODES, MAX_ROWS_PER_MODE, MAX_KEYWORD_CHARS, MAX_LINE_BYTES,
                      DEFAULT_FIRMWARE, EMULATION_MODES, hidden_drive_modes, firmware_phrase,
-                     function_errors, check_csv_filename, unsafe_text, MODE_OVERRIDABLE)
+                     function_errors, check_csv_filename,
+                     unsafe_text, MODE_OVERRIDABLE)
 from .preferences import THRESHOLD_ORDER
 
 RESERVED = {"default.csv", "prefs.csv"}
@@ -36,6 +37,11 @@ def validate(cfg, problems=None, firmware=None):
             info(None, 2, f"The QuadStick lowercases filenames, so the device will call this {cfg.filename.lower()}")
         if cfg.filename.lower() in RESERVED:
             warn(None, 2, f"'{cfg.filename}' is reserved by the QuadStick; a broken default.csv can hide the flash drive")
+        # Deliberately nothing here about the name matching the filename. The firmware
+        # loads by filename and never reads the name on line 1, so the name is free text
+        # for the owner's benefit: "Fortnite - Dad's build" beside ddfortnite.csv is a
+        # good label, not a fault. A warning was tried on 2026-09-15 and removed the same
+        # day — it fired on four of the six fixtures, which is how you know it was wrong.
     if not cfg.modes:
         err(None, None, "No mode sheets found (sheets whose A1 is 'Profile Name')")
     if len(cfg.modes) > MAX_MODES:

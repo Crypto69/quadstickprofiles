@@ -125,12 +125,20 @@ export interface Validation {
   unused_inputs: string[]
 }
 
+/**
+ * A function parameter. Canonically a number, but the device file may hold a
+ * non-numeric token (the firmware reads it as 0) and the API round-trips it
+ * unchanged rather than silently rewriting the user's file, so the editor has to
+ * be able to carry a string through untouched.
+ */
+export type FunctionParam = number | string
+
 export interface MappingIn {
   kind?: MappingKind
   output: string // an output name, or a preference key when kind === 'preference'
   value?: string
   function?: string
-  params?: number[]
+  params?: FunctionParam[]
   inputs?: string[]
   comment?: string | null
 }
@@ -212,6 +220,17 @@ export interface ProfileCreate extends Partial<ProfileMeta> {
   preferences?: Record<string, string>
   game_actions?: GameActionIn[]
   input_names?: Record<string, string>
+}
+
+/**
+ * The body PATCH /api/profiles/{id} accepts: metadata, the input renames and the
+ * game actions. `modes` and `preferences` are deliberately absent — the server
+ * ignores them on PATCH and answers 200, so a caller that sent them would think
+ * the edit landed. Replacing those goes through PUT.
+ */
+export interface ProfilePatch extends Partial<ProfileMeta> {
+  input_names?: Record<string, string>
+  game_actions?: GameActionIn[]
 }
 
 export interface ImportResult {

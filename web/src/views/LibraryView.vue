@@ -12,6 +12,7 @@ import { saveBlob } from '@/composables/useDownload'
 import { openExternal } from '@/composables/useExternalLink'
 import { useFilePicker } from '@/composables/useFilePicker'
 import { unknownFirmwareWarning } from '@/device/flashDrive'
+import { convertedName, copyName, csvFilenameForName } from '@/lib/filename'
 import { useCatalogStore } from '@/stores/catalog'
 import { useProfilesStore } from '@/stores/profiles'
 
@@ -149,19 +150,111 @@ function printSummary(p: ProfileSummary) {
   openExternal(api.summaryUrl(p.id))
 }
 
-async function doConvert(p: ProfileSummary) {
-  await store.convert(p.id, otherConsole(p.console))
+// ---------------------------------------------------------- name and filename
+/**
+ * The QuadStick loads a profile by its *filename*. Duplicate used to fire straight
+ * away and invent both halves, leaving a name and a file that told different stories
+ * ("cvcodww2 (copy)" living in `cvcodww2_copy.csv`) and no way to tell which file on
+ * the stick was which without going hunting. So all three now ask, and the filename
+ * box fills itself in from the name as it is typed: name a copy once and the pair
+ * matches for free.
+ *
+ * Making them differ is then perfectly fine and nothing complains — the firmware
+ * never reads the name, so a descriptive label beside a terse filename is a good
+ * profile, not a broken one. The auto-fill is a convenience, not a rule.
+ */
+type NameJob =
+  | { kind: 'duplicate'; profile: ProfileSummary }
+  | { kind: 'convert'; profile: ProfileSummary; target: Console }
+  | { kind: 'rename'; profile: ProfileSummary }
+
+const job = ref<NameJob | null>(null)
+const jobName = ref('')
+/** Empty means "follow the name"; anything typed here is the user's own choice and
+ *  is never rewritten from under them. */
+const jobFilename = ref('')
+
+const JOB_TITLES: Record<NameJob['kind'], string> = {
+  duplicate: 'Make a copy',
+  convert: 'Convert to the other button names',
+  rename: 'Rename this profile',
+}
+const JOB_CONFIRM: Record<NameJob['kind'], string> = {
+  duplicate: 'Make the copy',
+  convert: 'Convert',
+  rename: 'Save',
+}
+
+const jobTitle = computed(() => (job.value ? JOB_TITLES[job.value.kind] : ''))
+const jobConfirm = computed(() => (job.value ? JOB_CONFIRM[job.value.kind] : ''))
+
+/** What the filename field will send: what was typed, else what the name suggests. */
+const jobFilenameFinal = computed(
+  () => jobFilename.value.trim() || csvFilenameForName(jobName.value),
+)
+
+function openJob(next: NameJob) {
+  job.value = next
+  const p = next.profile
+  jobName.value =
+    next.kind === 'duplicate'
+      ? copyName(p.name)
+      : next.kind === 'convert'
+        ? convertedName(p.name, next.target)
+        : p.name
+  // Rename starts from what the profile has now, so an untouched save changes nothing.
+  // The other two start empty, so the field follows the name as it is typed.
+  jobFilename.value = next.kind === 'rename' ? p.csv_filename : ''
+  store.dismissError()
+}
+
+function closeJob() {
+  job.value = null
+}
+
+/**
+ * Guarded on both sides, like Delete: a second activation while the first request is
+ * away would send it twice, and this audience activates a button twice more readily
+ * than most. The dialog closes only on success, so a failure stays where it can be
+ * read instead of vanishing behind the scrim.
+ */
+async function runJob() {
+  const j = job.value
+  if (!j || store.busyId === j.profile.id) return
+  const name = jobName.value.trim()
+  if (!name) return
+  const csv_filename = jobFilenameFinal.value
+  const ok =
+    j.kind === 'duplicate'
+      ? await store.duplicate(j.profile.id, { name, csv_filename })
+      : j.kind === 'convert'
+        ? await store.convert(j.profile.id, j.target, { name, csv_filename })
+        : await store.rename(j.profile.id, { name, csv_filename })
+  if (ok) job.value = null
 }
 
 async function createProfile() {
   const name = newProfile.value.name.trim()
-  const filename = newProfile.value.filename.trim() || `${slug(name)}.csv`
+  const filename = newProfile.value.filename.trim() || csvFilenameForName(name)
   const game = newProfile.value.game.trim() || undefined
   const from = newProfile.value.from
   const p = from
     ? await store.createFromTemplate(from, { name, csv_filename: filename, game })
     : await store.create({ name, csv_filename: filename, game })
   if (p) newProfile.value = { open: false, name: '', filename: '', game: '', from: null }
+}
+
+/**
+ * Delete, guarded on both sides. A second activation while the first DELETE is
+ * running would send it twice and show the second one's 404 as an error after the
+ * first succeeded — and this audience activates a button twice more easily than
+ * most. The dialog closes only on success, so a failure stays where the user can
+ * read it instead of vanishing behind a banner they never see.
+ */
+async function doDelete() {
+  const p = confirmDelete.value
+  if (!p || store.busyId === p.id) return
+  if (await store.remove(p.id)) confirmDelete.value = null
 }
 
 /** Prefill the name and game from the starter, so one click is usually enough. */
@@ -174,12 +267,8 @@ function chooseStart(id: number | null) {
   }
 }
 
-function slug(s: string) {
-  return s.toLowerCase().replace(/[^a-z0-9]+/g, '') || 'profile'
-}
-
-const suggestedFilename = computed(() =>
-  newProfile.value.filename.trim() || `${slug(newProfile.value.name)}.csv`,
+const suggestedFilename = computed(
+  () => newProfile.value.filename.trim() || csvFilenameForName(newProfile.value.name),
 )
 </script>
 
@@ -341,8 +430,16 @@ const suggestedFilename = computed(() =>
           <button
             class="btn btn--small"
             type="button"
+            title="Change the name and the filename the QuadStick loads it by"
+            @click="openJob({ kind: 'rename', profile: p })"
+          >
+            Rename
+          </button>
+          <button
+            class="btn btn--small"
+            type="button"
             :disabled="store.busyId === p.id"
-            @click="store.duplicate(p.id)"
+            @click="openJob({ kind: 'duplicate', profile: p })"
           >
             Duplicate
           </button>
@@ -351,7 +448,7 @@ const suggestedFilename = computed(() =>
             type="button"
             :disabled="store.busyId === p.id"
             :title="`Make a copy using ${consoleLabel(otherConsole(p.console))} button names`"
-            @click="doConvert(p)"
+            @click="openJob({ kind: 'convert', profile: p, target: otherConsole(p.console) })"
           >
             To {{ consoleLabel(otherConsole(p.console)) }}
           </button>
@@ -503,6 +600,59 @@ const suggestedFilename = computed(() =>
     </template>
   </ModalDialog>
 
+  <!-- rename / duplicate / convert ------------------------------------------ -->
+  <!-- One dialog for all three, because all three ask the same question: what should
+       this profile be called, and what should its file on the QuadStick be called. -->
+  <ModalDialog :open="job !== null" :title="jobTitle" @close="closeJob()">
+    <div v-if="job" class="stack">
+      <p v-if="job.kind === 'duplicate'">
+        A copy of <b>{{ job.profile.name }}</b>. It gets its own file, so both can sit on
+        the QuadStick at once.
+      </p>
+      <p v-else-if="job.kind === 'convert'">
+        A copy of <b>{{ job.profile.name }}</b> using
+        {{ consoleLabel(job.target) }} button names. The original is left as it is.
+      </p>
+      <p v-else>
+        <b>{{ job.profile.name }}</b> keeps all its modes and mappings. Renaming the file
+        here does not rename the copy already on the QuadStick — export it again.
+      </p>
+
+      <div class="field">
+        <label for="job-name">Name</label>
+        <input id="job-name" v-model="jobName" class="input" type="text" />
+      </div>
+      <div class="field">
+        <label for="job-file">Filename on the QuadStick</label>
+        <input
+          id="job-file"
+          v-model="jobFilename"
+          class="input"
+          type="text"
+          :placeholder="csvFilenameForName(jobName)"
+        />
+        <p class="hint">
+          Follows the name unless you type your own. Must end in
+          <span class="mono">.csv</span>, with no spaces or commas.
+        </p>
+      </div>
+
+      <!-- the page banner sits behind the scrim, so a failure has to be said here -->
+      <p v-if="store.error" class="banner banner--error" role="alert">{{ store.error }}</p>
+    </div>
+    <template #actions>
+      <button class="btn" type="button" @click="closeJob()">Cancel</button>
+      <button
+        class="btn btn--primary"
+        type="button"
+        :disabled="!jobName.trim() || (job !== null && store.busyId === job.profile.id)"
+        @click="runJob"
+      >
+        {{ jobConfirm }}
+      </button>
+    </template>
+  </ModalDialog>
+
   <!-- delete --------------------------------------------------------------- -->
   <ModalDialog
     :open="confirmDelete !== null"
@@ -513,14 +663,15 @@ const suggestedFilename = computed(() =>
       <b>{{ confirmDelete.name }}</b> will be removed from this app. Any copy already on the
       QuadStick's flash drive stays there.
     </p>
+    <!-- the page banner sits behind the scrim, so a failure has to be said here -->
+    <p v-if="store.error" class="banner banner--error" role="alert">{{ store.error }}</p>
     <template #actions>
       <button class="btn" type="button" @click="confirmDelete = null">Keep it</button>
       <button
         class="btn btn--danger"
         type="button"
-        @click="
-          confirmDelete && store.remove(confirmDelete.id).then(() => (confirmDelete = null))
-        "
+        :disabled="confirmDelete !== null && store.busyId === confirmDelete.id"
+        @click="doDelete"
       >
         Delete
       </button>

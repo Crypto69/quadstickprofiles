@@ -13,8 +13,9 @@ from qsprofile import catalog as C
 from qsprofile import read_prefs_csv, validate_preferences, write_prefs_csv
 from .. import models as M, schemas as S
 from ..db import get_session
-from ..settings import settings
-from .profiles import write_atomically
+from ..headers import export_path_header
+from ..uploads import read_capped
+from .profiles import write_atomically, _export_target
 
 router = APIRouter(prefix="/prefs", tags=["preferences"])
 
@@ -26,8 +27,8 @@ Firmware = Query(C.DEFAULT_FIRMWARE, description="firmware the device runs; deci
 
 
 def _firmware(fw: int) -> int:
-    if fw not in C.FIRMWARE_VERSIONS:
-        raise HTTPException(422, f"Unknown firmware {fw}; known: {', '.join(map(str, C.FIRMWARE_VERSIONS))}")
+    if problem := C.check_firmware(fw):
+        raise HTTPException(422, problem)
     return fw
 
 
@@ -111,7 +112,7 @@ async def import_prefs(file: UploadFile = File(...), firmware: int = Firmware,
     fw = _firmware(firmware)
     if not (file.filename or "").lower().endswith(".csv"):
         raise HTTPException(415, "Upload the prefs.csv from the QuadStick's flash drive")
-    data = await file.read()
+    data = await read_capped(file)
     with tempfile.TemporaryDirectory() as td:
         tmp = Path(td) / PREFS_FILENAME
         tmp.write_bytes(data)
@@ -150,12 +151,8 @@ def export_prefs(firmware: int = Firmware, db: Session = Depends(get_session)):
     if _has_errors(findings):
         raise HTTPException(409, detail={"message": "Export refused: fix the settings first",
                                          "validation": S.ValidationOut.from_findings(findings).model_dump()})
-    exports = settings.exports_dir.resolve()
-    exports.mkdir(parents=True, exist_ok=True)
-    out = (exports / PREFS_FILENAME).resolve()
-    if out.parent != exports or out.name != PREFS_FILENAME:      # exports/ itself is a symlink or worse
-        raise HTTPException(400, f"'{PREFS_FILENAME}' does not resolve to a file inside the exports directory")
+    out = _export_target(PREFS_FILENAME)
     data = write_atomically(out, lambda path: write_prefs_csv(prefs, path))
     return Response(data, media_type="text/csv",
                     headers={"Content-Disposition": f'attachment; filename="{PREFS_FILENAME}"',
-                             "X-Export-Path": str(out)})
+                             "X-Export-Path": export_path_header(out)})

@@ -2,7 +2,10 @@ import { mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import LibraryView from './LibraryView.vue'
-import { catalog, conflict, fileResponse, noContent, profile, stubFetch, summary, validation } from '@/test/factories'
+import { useProfilesStore } from '@/stores/profiles'
+import {
+  catalog, conflict, fileResponse, noContent, notFound, profile, stubFetch, summary, validation,
+} from '@/test/factories'
 
 const RouterLinkStub = {
   props: ['to'],
@@ -269,6 +272,78 @@ describe('LibraryView', () => {
     w.unmount()
   })
 
+  /** The dialog's own confirm button, not the row's Delete. */
+  function confirmButton() {
+    return [...document.body.querySelectorAll('footer button')].find(
+      (b) => (b.textContent ?? '').trim() === 'Delete',
+    ) as HTMLButtonElement
+  }
+
+  it('sends one DELETE on a double activation, and disables the confirm meanwhile', async () => {
+    // This audience activates a button twice more readily than most; a second DELETE
+    // would answer 404 and show that as an error after the first one succeeded.
+    let release: (() => void) | undefined
+    const gate = new Promise<void>((r) => (release = r))
+    const inner = stubFetch({
+      '/api/catalog': catalog(),
+      '/api/profiles?templates=true': [],
+      '/api/profiles?validate=true': [summary()],
+      'DELETE /api/profiles/1': noContent(),
+    })
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.method === 'DELETE') await gate
+      return inner(input, init)
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    const w = mountLibrary()
+    await settle()
+
+    button('Delete')!.click()
+    await settle()
+    confirmButton().click()
+    await settle()
+    expect(confirmButton().disabled).toBe(true)
+    confirmButton().click() // the second activation, while the first is away
+    await settle()
+    expect(fetchMock.mock.calls.filter((c) => c[1]?.method === 'DELETE')).toHaveLength(1)
+
+    release!()
+    // the DELETE, then the reload it triggers, must both land before the test ends,
+    // or the reload's fetch turns up in the next test's call count
+    await vi.waitFor(() => expect(document.body.textContent).not.toContain('Delete this profile?'))
+    await settle()
+    expect(useProfilesStore().busyId).toBeNull()
+    expect(useProfilesStore().error).toBeNull()
+    w.unmount()
+  })
+
+  it('keeps the delete dialog open, and says why, when the delete fails', async () => {
+    vi.stubGlobal(
+      'fetch',
+      stubFetch({
+        '/api/catalog': catalog(),
+        '/api/profiles?templates=true': [],
+        '/api/profiles?validate=true': [summary()],
+        'DELETE /api/profiles/1': notFound(),
+      }),
+    )
+    const w = mountLibrary()
+    await settle()
+
+    button('Delete')!.click()
+    await settle()
+    confirmButton().click()
+    await settle()
+
+    // the page banner sits behind the scrim, so the reason has to be in the dialog
+    expect(document.body.textContent).toContain('Delete this profile?')
+    expect(document.body.textContent).toContain('Profile not found')
+    const store = useProfilesStore()
+    expect(store.busyId).toBeNull()
+    expect(confirmButton().disabled).toBe(false)
+    w.unmount()
+  })
+
   it.each([
     ['Print detailed sheets', '/api/profiles/1/card.html'],
     ['Print summary', '/api/profiles/1/summary.html'],
@@ -460,6 +535,301 @@ describe('LibraryView', () => {
     await settle()
     expect(w.text()).toContain('No profile matches')
     expect(w.text()).not.toContain('Nothing here yet')
+    w.unmount()
+  })
+
+  // ------------------------------------------------- name and filename dialogs
+  /**
+   * The QuadStick loads a profile by its *filename*; the name is cosmetic. Duplicate
+   * used to fire immediately and leave "cvcodww2 (copy)" living in `cvcodww2_copy.csv`,
+   * so there was no telling which file on the stick was which.
+   */
+  function field(id: string) {
+    return document.body.querySelector<HTMLInputElement>(`#${id}`)!
+  }
+
+  async function type(id: string, value: string) {
+    const el = field(id)
+    el.value = value
+    el.dispatchEvent(new Event('input'))
+    await settle()
+  }
+
+  /** The dialog's own confirm, not a row button of the same name. */
+  function footerButton(label: string) {
+    return [...document.body.querySelectorAll('footer button')].find(
+      (b) => (b.textContent ?? '').trim() === label,
+    ) as HTMLButtonElement
+  }
+
+  function oneProfile(extra: Record<string, unknown> = {}) {
+    return stubFetch({
+      '/api/catalog': catalog(),
+      '/api/profiles?templates=true': [],
+      '/api/profiles?validate=true': [
+        summary({ id: 1, name: 'cvcodww2', csv_filename: 'cvcodww2.csv' }),
+      ],
+      ...extra,
+    })
+  }
+
+  it('asks for a name before duplicating, instead of inventing a mismatched pair', async () => {
+    const fetchMock = oneProfile({
+      'POST /api/profiles/1/duplicate?name=cvcodww2_copy&csv_filename=cvcodww2_copy.csv':
+        profile({ id: 2, name: 'cvcodww2_copy', csv_filename: 'cvcodww2_copy.csv' }),
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    const w = mountLibrary()
+    await settle()
+
+    button('Duplicate')!.click()
+    await settle()
+    // nothing sent yet — it asks first
+    expect(fetchMock.mock.calls.some((c) => String(c[0]).includes('/duplicate'))).toBe(false)
+    expect(document.body.textContent).toContain('Make a copy')
+
+    // prefilled so that pressing the confirm straight away gives a matching pair
+    expect(field('job-name').value).toBe('cvcodww2_copy')
+    expect(field('job-file').placeholder).toBe('cvcodww2_copy.csv')
+
+    footerButton('Make the copy').click()
+    await settle()
+    const call = fetchMock.mock.calls.find((c) => String(c[0]).includes('/duplicate'))!
+    expect(String(call[0])).toContain('name=cvcodww2_copy')
+    expect(String(call[0])).toContain('csv_filename=cvcodww2_copy.csv')
+    w.unmount()
+  })
+
+  it('follows the typed name with the suggested filename, keeping _ and -', async () => {
+    // The old slug() stripped _ and -, so `cod_ww2` became `codww2.csv` — a different
+    // file from the one the owner has on the stick.
+    vi.stubGlobal('fetch', oneProfile())
+    const w = mountLibrary()
+    await settle()
+    button('Duplicate')!.click()
+    await settle()
+
+    await type('job-name', 'cod_ww2')
+    expect(field('job-file').placeholder).toBe('cod_ww2.csv')
+    await type('job-name', 'Call of Duty: WW2')
+    expect(field('job-file').placeholder).toBe('call_of_duty_ww2.csv')
+    w.unmount()
+  })
+
+  it('sends a filename the user typed over, rather than the suggestion', async () => {
+    const fetchMock = oneProfile({
+      'POST /api/profiles/1/duplicate?name=Tweaked&csv_filename=keepme.csv':
+        profile({ id: 2, name: 'Tweaked', csv_filename: 'keepme.csv' }),
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    const w = mountLibrary()
+    await settle()
+    button('Duplicate')!.click()
+    await settle()
+
+    await type('job-name', 'Tweaked')
+    await type('job-file', 'keepme.csv')
+    // typing the name again must not stomp on the filename the user chose
+    await type('job-name', 'Tweaked')
+    expect(field('job-file').value).toBe('keepme.csv')
+
+    footerButton('Make the copy').click()
+    await settle()
+    const call = fetchMock.mock.calls.find((c) => String(c[0]).includes('/duplicate'))!
+    expect(String(call[0])).toContain('csv_filename=keepme.csv')
+    w.unmount()
+  })
+
+  it('asks for a name before converting, and sends both through', async () => {
+    const fetchMock = oneProfile({
+      'POST /api/profiles/1/convert': {
+        profile: profile({ id: 3, console: 'xbox' }),
+        notes: [],
+        suggested_csv_filename: 'cvcodww2_xbox.csv',
+      },
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    const w = mountLibrary()
+    await settle()
+
+    button('To Xbox')!.click()
+    await settle()
+    expect(fetchMock.mock.calls.some((c) => String(c[0]).includes('/convert'))).toBe(false)
+    expect(field('job-name').value).toBe('cvcodww2_xbox')
+
+    footerButton('Convert').click()
+    await settle()
+    const call = fetchMock.mock.calls.find((c) => String(c[0]).includes('/convert'))!
+    expect(JSON.parse(String(call[1]!.body))).toEqual({
+      target: 'xbox', name: 'cvcodww2_xbox', csv_filename: 'cvcodww2_xbox.csv',
+    })
+    w.unmount()
+  })
+
+  it('renames from the library, and the list shows the new pair', async () => {
+    const fetchMock = stubFetch({
+      '/api/catalog': catalog(),
+      '/api/profiles?templates=true': [],
+      '/api/profiles?validate=true': (() => {
+        let renamed = false
+        return () => {
+          const rows = renamed
+            ? [summary({ id: 1, name: 'COD WW2', csv_filename: 'cod_ww2.csv' })]
+            : [summary({ id: 1, name: 'cvcodww2', csv_filename: 'cvcodww2.csv' })]
+          renamed = true
+          return rows
+        }
+      })(),
+      'PATCH /api/profiles/1': profile({ name: 'COD WW2', csv_filename: 'cod_ww2.csv' }),
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    const w = mountLibrary()
+    await settle()
+
+    button('Rename')!.click()
+    await settle()
+    // prefilled with what the profile has now, so an untouched save changes nothing
+    expect(field('job-name').value).toBe('cvcodww2')
+    expect(field('job-file').value).toBe('cvcodww2.csv')
+
+    await type('job-name', 'COD WW2')
+    await type('job-file', 'cod_ww2.csv')
+    footerButton('Save').click()
+    await settle()
+
+    const call = fetchMock.mock.calls.find((c) => c[1]?.method === 'PATCH')!
+    expect(JSON.parse(String(call[1]!.body))).toEqual({
+      name: 'COD WW2', csv_filename: 'cod_ww2.csv',
+    })
+    expect(document.body.textContent).not.toContain('Rename this profile')
+    expect(w.text()).toContain('cod_ww2.csv')
+    w.unmount()
+  })
+
+  it('says nothing when the name and the filename differ — that is not a fault', async () => {
+    // The firmware never reads the name, so "Fortnite - Dad's build" beside
+    // ddfortnite.csv is a good label, not a problem. Auto-fill is a convenience; the
+    // two fields are independent and neither nags about the other.
+    vi.stubGlobal('fetch', oneProfile())
+    const w = mountLibrary()
+    await settle()
+    button('Rename')!.click()
+    await settle()
+
+    await type('job-name', "Fortnite - Dad's build")
+    const panel = document.body.querySelector('.panel')!
+    expect(panel.textContent).not.toMatch(/do not match|goes by the file|will be the file/i)
+    expect(panel.querySelectorAll('.mismatch')).toHaveLength(0)
+    expect(field('job-file').getAttribute('aria-invalid')).toBeNull()
+    // and nothing is rewritten under the user, nor is saving blocked
+    expect(field('job-file').value).toBe('cvcodww2.csv')
+    expect(footerButton('Save').disabled).toBe(false)
+    w.unmount()
+  })
+
+  it('keeps the dialog open, and says why inside it, when the request fails', async () => {
+    vi.stubGlobal('fetch', oneProfile({ 'PATCH /api/profiles/1': notFound() }))
+    const w = mountLibrary()
+    await settle()
+    button('Rename')!.click()
+    await settle()
+    footerButton('Save').click()
+    await settle()
+
+    // the page banner sits behind the scrim, so the reason has to be in the dialog
+    expect(document.body.textContent).toContain('Rename this profile')
+    expect(document.body.querySelector('.panel')!.textContent).toContain('Profile not found')
+    expect(useProfilesStore().busyId).toBeNull()
+    expect(footerButton('Save').disabled).toBe(false)
+    w.unmount()
+  })
+
+  it('sends one request on a double activation, and disables the confirm meanwhile', async () => {
+    let release: (() => void) | undefined
+    const gate = new Promise<void>((r) => (release = r))
+    const inner = oneProfile({
+      'POST /api/profiles/1/duplicate?name=cvcodww2_copy&csv_filename=cvcodww2_copy.csv':
+        profile({ id: 2 }),
+    })
+    // Every request this test starts is tracked, so the end of the test can wait for
+    // all of them to have *finished* rather than guessing from the DOM. A reload still
+    // in flight when the test ends turns up in a later test's call count.
+    const inFlight = new Set<Promise<unknown>>()
+    const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const p = (async () => {
+        if (String(input).includes('/duplicate')) await gate
+        return inner(input, init)
+      })()
+      inFlight.add(p)
+      void p.catch(() => {}).finally(() => inFlight.delete(p))
+      return p
+    })
+    const quiet = async () => {
+      while (inFlight.size) {
+        await Promise.allSettled([...inFlight])
+        await settle()
+      }
+    }
+    vi.stubGlobal('fetch', fetchMock)
+    const w = mountLibrary()
+    await settle()
+
+    button('Duplicate')!.click()
+    await settle()
+    footerButton('Make the copy').click()
+    await settle()
+    expect(footerButton('Make the copy').disabled).toBe(true)
+    footerButton('Make the copy').click() // the second activation, while the first is away
+    await settle()
+    expect(fetchMock.mock.calls.filter((c) => String(c[0]).includes('/duplicate'))).toHaveLength(1)
+
+    release!()
+    // The POST and the reload it triggers must both finish before the test ends.
+    await quiet()
+    expect(document.body.textContent).not.toContain('Make a copy')
+    expect(useProfilesStore().busyId).toBeNull()
+    expect(useProfilesStore().error).toBeNull()
+    w.unmount()
+  })
+
+  it('does not carry an earlier failure into a freshly opened dialog', async () => {
+    vi.stubGlobal('fetch', oneProfile({ 'PATCH /api/profiles/1': notFound() }))
+    const w = mountLibrary()
+    await settle()
+    button('Rename')!.click()
+    await settle()
+    footerButton('Save').click()
+    await settle()
+    expect(document.body.querySelector('.panel')!.textContent).toContain('Profile not found')
+
+    button('Close')!.click()
+    await settle()
+    button('Duplicate')!.click()
+    await settle()
+    expect(document.body.querySelector('.panel')!.textContent).not.toContain('Profile not found')
+    w.unmount()
+  })
+
+  it('suggests a filename that keeps _ and - for a brand-new profile too', async () => {
+    const fetchMock = stubFetch({
+      '/api/catalog': catalog(),
+      '/api/profiles?validate=true': [summary()],
+      '/api/profiles?templates=true': [],
+      'POST /api/profiles': profile({ id: 21, name: 'cod_ww2' }),
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    const w = mountLibrary()
+    await settle()
+    button('New profile')!.click()
+    await settle()
+    await type('np-name', 'cod_ww2')
+    button('Create')!.click()
+    await settle()
+    const call = fetchMock.mock.calls.find(
+      (c) => String(c[0]).endsWith('/api/profiles') && c[1]?.method === 'POST',
+    )!
+    // the old slug() stripped the underscore and produced codww2.csv
+    expect(JSON.parse(String(call[1]!.body))).toMatchObject({ csv_filename: 'cod_ww2.csv' })
     w.unmount()
   })
 

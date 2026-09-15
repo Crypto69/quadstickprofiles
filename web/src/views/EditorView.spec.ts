@@ -381,6 +381,30 @@ describe('EditorView', () => {
       w.unmount()
     })
 
+    it('a failed load does not pin the 404 when you go back to a profile that works', async () => {
+      // The store outlives the view and the route watcher skips load() when the route
+      // id already equals the store's, so a stale id after a 404 would show the error
+      // for good.
+      const { w, router, fetchMock, docStore } = await page({
+        '/api/profiles/2': { status: 404, body: JSON.stringify({ detail: 'Profile not found' }) },
+      })
+      const before = fetchMock.mock.calls.filter((c) => String(c[0]).endsWith('/api/profiles/1')).length
+
+      await router.push('/profiles/2')
+      await settle()
+      expect(w.text()).toContain('Profile not found')
+      expect(docStore.doc).toBeNull()
+
+      await router.push('/profiles/1')
+      await settle()
+      expect(docStore.doc?.name).toBe('ddfortnite')
+      expect(w.find('h1').text()).toBe('ddfortnite')
+      // it really went back to the API rather than reusing a stale id
+      const after = fetchMock.mock.calls.filter((c) => String(c[0]).endsWith('/api/profiles/1')).length
+      expect(after).toBe(before + 1)
+      w.unmount()
+    })
+
     it('asks before leaving the editor altogether', async () => {
       const { w, router, docStore } = await page()
       const confirm = vi.fn(() => false)

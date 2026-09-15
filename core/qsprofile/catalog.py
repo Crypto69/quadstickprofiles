@@ -85,6 +85,42 @@ def check_csv_filename(name):
     if not CSV_FILENAME_RE.match(low):
         return f"'{s}' has characters the QuadStick cannot use; use letters, digits, _ - and ."
     return None
+
+
+def derived_csv_filename(base, suffix):
+    """`<stem>_<suffix>.csv`, with the stem cut short so the whole name still fits the
+    device's 31 characters. Used for the names the server invents itself (a duplicate's
+    `_copy`, a conversion's `_ps` / `_xbox`), which the user never gets to shorten."""
+    stem = str(base or "").rsplit("/", 1)[-1].rsplit("\\", 1)[-1]
+    if "." in stem:
+        stem = stem.rsplit(".", 1)[0]
+    stem = stem.lower()
+    budget = MAX_CSV_FILENAME_CHARS - len(".csv") - len(suffix) - 1
+    return f"{stem[:budget].rstrip('._-') or 'profile'}_{suffix}.csv"
+
+
+def csv_filename_for_name(name):
+    """The `.csv` filename a profile called `name` should have, by the same rules
+    `derived_csv_filename` uses: lowercase, only [a-z0-9_-], any run of anything else
+    collapsed to a single `_`, no leading or trailing `._-`, stem cut to fit the
+    device's 31 characters, and `profile.csv` when nothing survives. Underscores and
+    dashes are KEPT — `check_csv_filename` allows both, so stripping them (as an
+    earlier frontend slug did) would invent a different name for the same profile.
+    The one rule shared by the API and the UI, used to suggest a filename that matches
+    a name the owner typed; every result satisfies `check_csv_filename`. Suggesting is
+    all it does — the device never reads the name, so the two fields are free to differ
+    and nothing reports it (see the note in `validate.py`)."""
+    stem = re.sub(r"[^a-z0-9_-]+", "_", str(name or "").lower())
+    budget = MAX_CSV_FILENAME_CHARS - len(".csv")
+    return f"{stem.strip('._-')[:budget].rstrip('._-') or 'profile'}.csv"
+
+
+def check_firmware(firmware):
+    """None when `firmware` is a version this tool knows, else a plain sentence. The
+    one wording for the five places that ask (two routers, three request schemas)."""
+    if firmware in FIRMWARE_VERSIONS:
+        return None
+    return f"Unknown firmware {firmware}; known: {', '.join(map(str, FIRMWARE_VERSIONS))}"
 # enable_DS3_emulation values that hide the flash drive (a mistake then needs the
 # side-tube recovery procedure). 2373: union of QCM's code ({1, 3, 5, 6, 7}, from the
 # firmware USB descriptors) and its FORMAT.md ({5, 6, 7}); modes 1 and 3 are unverified

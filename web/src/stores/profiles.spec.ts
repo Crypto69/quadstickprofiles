@@ -2,7 +2,8 @@ import { createPinia, setActivePinia } from 'pinia'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { healthOf, useProfilesStore } from './profiles'
 import {
-  conflict, fileResponse, noContent, profile, stubFetch, summary, unprocessable, validation,
+  conflict, deferredFetch, fileResponse, noContent, profile, stubFetch, summary, unprocessable,
+  validation,
 } from '@/test/factories'
 
 describe('healthOf', () => {
@@ -162,6 +163,60 @@ describe('profiles store', () => {
     expect(copy).not.toBeNull()
   })
 
+  it('passes a chosen name and filename to convert', async () => {
+    const fetchMock = stubFetch({
+      'POST /api/profiles/1/convert': {
+        profile: profile({ id: 3, console: 'xbox', name: 'cvcodww2_xbox' }),
+        notes: [],
+        suggested_csv_filename: 'cvcodww2_xbox.csv',
+      },
+      '/api/profiles?validate=true': [],
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    const store = useProfilesStore()
+    await store.convert(1, 'xbox', { name: 'cvcodww2_xbox', csv_filename: 'cvcodww2_xbox.csv' })
+    const call = fetchMock.mock.calls.find((c) => String(c[0]).includes('/convert'))!
+    expect(JSON.parse(String(call[1]!.body))).toEqual({
+      target: 'xbox', name: 'cvcodww2_xbox', csv_filename: 'cvcodww2_xbox.csv',
+    })
+  })
+
+  it('renames with PATCH, so the modes and preferences are never resent', async () => {
+    // PATCH ignores modes and preferences by design (ProfilePatch), which is exactly
+    // the guarantee wanted for a metadata-only edit: a stale library copy of the
+    // document cannot clobber the profile's contents.
+    const fetchMock = stubFetch({
+      'PATCH /api/profiles/1': profile({ name: 'cvcodww2', csv_filename: 'cvcodww2.csv' }),
+      '/api/profiles?validate=true': [summary({ name: 'cvcodww2', csv_filename: 'cvcodww2.csv' })],
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    const store = useProfilesStore()
+    const p = await store.rename(1, { name: 'cvcodww2', csv_filename: 'cvcodww2.csv' })
+    expect(p?.name).toBe('cvcodww2')
+    const call = fetchMock.mock.calls.find((c) => c[1]?.method === 'PATCH')!
+    expect(JSON.parse(String(call[1]!.body))).toEqual({
+      name: 'cvcodww2', csv_filename: 'cvcodww2.csv',
+    })
+    // and the list reflects it
+    expect(store.profiles[0]!.csv_filename).toBe('cvcodww2.csv')
+    expect(store.error).toBeNull()
+  })
+
+  it('reports a rejected rename without leaving the list changed', async () => {
+    vi.stubGlobal(
+      'fetch',
+      stubFetch({
+        'PATCH /api/profiles/1': unprocessable([
+          { loc: ['body', 'csv_filename'], msg: 'must end in .csv' },
+        ]),
+      }),
+    )
+    const store = useProfilesStore()
+    expect(await store.rename(1, { name: 'x', csv_filename: 'bad name' })).toBeNull()
+    expect(store.error).toContain('must end in .csv')
+    expect(store.busyId).toBeNull()
+  })
+
   it('reports a bad new-profile filename instead of silently doing nothing', async () => {
     vi.stubGlobal(
       'fetch',
@@ -175,6 +230,43 @@ describe('profiles store', () => {
     const p = await store.create({ name: 'x', csv_filename: 'bad name.csv' })
     expect(p).toBeNull()
     expect(store.error).toContain('must end in .csv')
+  })
+
+  it('a slower earlier search cannot overwrite a newer one', async () => {
+    // Typing in the search box leaves two requests in flight; the one that answers
+    // last would otherwise decide the list, however stale its query.
+    const { fetch, calls } = deferredFetch()
+    vi.stubGlobal('fetch', fetch)
+    const store = useProfilesStore()
+
+    const older = store.load({ q: 'fo' })
+    const newer = store.load({ q: 'fort' })
+    expect(calls).toHaveLength(2)
+
+    calls[1]!.release([summary({ id: 2, name: 'fortnite' })])
+    await newer
+    expect(store.profiles.map((p) => p.name)).toEqual(['fortnite'])
+    expect(store.loading).toBe(false)
+
+    calls[0]!.release([summary({ id: 3, name: 'forza' }), summary({ id: 4, name: 'fortnite' })])
+    await older
+    expect(store.profiles.map((p) => p.name)).toEqual(['fortnite'])
+    expect(store.loading).toBe(false)
+  })
+
+  it('a late failure from an older search does not raise the banner', async () => {
+    const { fetch, calls } = deferredFetch()
+    vi.stubGlobal('fetch', fetch)
+    const store = useProfilesStore()
+
+    const older = store.load({ q: 'fo' })
+    const newer = store.load({ q: 'fort' })
+    calls[1]!.release([summary()])
+    await newer
+    calls[0]!.release({ detail: 'boom' }, 500)
+    await older
+    expect(store.error).toBeNull()
+    expect(store.profiles).toHaveLength(1)
   })
 
   it('knows which profiles may be exported', () => {

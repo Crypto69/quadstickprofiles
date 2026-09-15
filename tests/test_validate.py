@@ -250,6 +250,25 @@ def test_profile_name_with_a_comma_is_a_warning_and_a_line_break_an_error():
     assert [x for x in errors(validate(c)) if "profile name" in x[3] and "non-ASCII" in x[3]]
 
 
+# ------------------------------------------- name vs filename (the device loads the file)
+@pytest.mark.parametrize("name, filename", [
+    ("Call of Duty WWII", "cvcodww2.csv"),      # a prose label against a short device name
+    ("Fortnite - Dad's build", "ddfortnite.csv"),
+    ("cvcodww2 (copy)", "cvcodww2_copy.csv"),
+    ("", "test.csv"),                           # a blank name is legal and round-trips
+])
+def test_a_name_that_does_not_match_its_filename_says_nothing(name, filename):
+    """The firmware loads by filename and never reads line 1's title, so the name is
+    free text for the owner. A mismatch warning was tried on 2026-09-15 and removed the
+    same day: it fired on four of the six fixtures, which is how you know it was wrong.
+    Nothing here may report on the name differing from the filename, at any severity."""
+    c = cfg()
+    c.name, c.filename = name, filename
+    f = validate(c)
+    assert not [x for x in f if "differ" in x[3] and "QuadStick this profile is" in x[3]], f
+    assert not errors(f)
+
+
 # ---------------------------------------------------------------- limits (off by one)
 def test_keyword_limit_is_63_characters():
     from qsprofile.catalog import MAX_KEYWORD_CHARS
