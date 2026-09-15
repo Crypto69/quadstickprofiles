@@ -1,6 +1,6 @@
 [project]
 name = "qsprofile"
-version = "0.1.0"
+version = "0.0.0"   # not the app version; scripts/version.sh is the single source
 description = "QuadStick profile parsing, validation, console conversion and printable reference cards"
 requires-python = ">=3.10"
 dependencies = ["openpyxl>=3.1"]

@@ -116,8 +116,10 @@ memorable ports faster than you expect.
 
 ## Step 4 — Write `.env`
 
-`deploy.sh` refuses to run without it, because a missing `.env` silently
-deploys Postgres with the default password.
+`deploy.sh` refuses to run without it, and so does compose: `QS_DB_PASSWORD`
+has no fallback, so `docker compose up` stops with
+`set QS_DB_PASSWORD in .env` rather than starting Postgres with a password
+that is published in this repo.
 
 ```bash
 cp .env.example .env
@@ -126,12 +128,43 @@ vi .env
 
 | variable | what it does |
 |---|---|
-| `QS_DB_PASSWORD` | Postgres password. **Change it.** |
+| `QS_DB_PASSWORD` | Postgres password. **Required**; compose refuses to start without it. New install: pick anything. Existing install: see below. |
 | `QS_WEB_PORT` | the app itself (default `8324`) |
 | `QS_API_PORT` | the API direct, for Swagger at `/api/docs` (default `8325`) |
 | `QS_EXPORTS_HOST` | *optional* — move exports out of `./exports` |
 | `QS_BACKUP_HOST` | *optional* — move backups out of `./data/backups` |
 | `QS_PGDATA_HOST` | *optional* — move the database out of `./data/pg` |
+
+### Upgrading an existing install — read this before you edit `.env`
+
+Earlier versions let `QS_DB_PASSWORD` fall back to the literal `quadstick`, so
+a deployment that never set it has a database that was **created with the
+password `quadstick`**. Compose now requires the variable, so that deployment
+must write it down explicitly:
+
+```sh
+QS_DB_PASSWORD=quadstick      # the value the existing database was created with
+```
+
+Put in the password the database already has — **not a new one**. Postgres
+applies `POSTGRES_PASSWORD` only when it initialises an *empty* data directory;
+after that the password lives inside `data/pg` and the variable is ignored. Set
+a different value and the API uses the new password while the database still
+expects the old one: the database starts and reports healthy, and the API fails
+to log in. `api/entrypoint.sh` detects exactly this and prints the recovery
+steps.
+
+If you genuinely want a different password on an existing database, change it
+*in* the database and in `.env` together:
+
+```sh
+docker compose exec db psql -U quadstick -d quadstick \
+  -c "alter user quadstick with password '<new>';"
+# then set the same <new> value as QS_DB_PASSWORD in .env and redeploy
+```
+
+A **new** install has no data directory yet, so it can pick any password: put
+it in `.env` before the first start and Postgres is created with it.
 
 **In practice you only set `QS_DB_PASSWORD`.** The three `_HOST` variables
 are commented out on purpose: left unset, the data lands inside the checkout
@@ -183,7 +216,7 @@ my deploy land?" without reading a commit hash:
 
 ```bash
 curl http://<your-nas>:8324/api/version
-# {"version":"0.2.0","app_version":"1.3","commit":"f5bf601","built":"2026-09-12T18:40Z"}
+# {"app_version":"1.3","commit":"f5bf601","built":"2026-09-12T18:40Z"}
 ```
 
 The number is `<VERSION file>.<commits since that file last changed>`, so every

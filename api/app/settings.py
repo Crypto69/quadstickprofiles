@@ -14,7 +14,11 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="QS_", extra="ignore",
                                       env_file=None if os.getenv("QS_NO_DOTENV") else ".env")
 
-    database_url: str = "postgresql+psycopg://quadstick:quadstick@localhost:5432/quadstick"
+    # Required, no default: a default would have to carry a password, and the
+    # one this repo used to ship (quadstick/quadstick) is public. Docker
+    # compose sets it from QS_DB_PASSWORD; the desktop launcher sets it to its
+    # SQLite file; a local run sets it in .env or the environment.
+    database_url: str
     exports_dir: Path = REPO_ROOT / "exports"      # also an SMB share on the NAS later
     fixtures_dir: Path = REPO_ROOT / "fixtures"
     actions_dir: Path = REPO_ROOT / "actions"

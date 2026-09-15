@@ -2,6 +2,13 @@
 QS_TEST_DATABASE_URL=postgresql+psycopg://... to run the same suite against
 Postgres through the real Alembic migration."""
 import os
+
+# Before anything can import app.settings (directly or through a plugin):
+# database_url has no default, so an unset QS_DATABASE_URL is a ValidationError
+# at import time, not a connection error later. The real value is set a few
+# lines down; this only guarantees the module is importable.
+os.environ.setdefault("QS_DATABASE_URL", "sqlite+pysqlite:///:memory:")
+
 import pathlib
 import pytest
 from fastapi.testclient import TestClient

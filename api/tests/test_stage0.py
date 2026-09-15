@@ -18,7 +18,7 @@ def test_version_reports_the_readable_deploy_number(root_client, monkeypatch):
     monkeypatch.setenv("QS_APP_VERSION", "1.7")
     v = root_client.get("/api/version").json()
     assert v["app_version"] == "1.7"
-    assert set(v) == {"version", "app_version", "commit", "built"}
+    assert set(v) == {"app_version", "commit", "built"}   # scripts/version.sh is the only source
 
 
 # ---------------------------------------------------------------- 0.3 legacy inputs

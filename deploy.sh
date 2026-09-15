@@ -54,11 +54,21 @@ export GIT_SHA BUILD_TIME APP_VERSION
 mkdir -p data/pg data/backups exports
 chown 999:999 data/pg 2>/dev/null || true   # no-op unless running as root
 
-# .env must exist: compose reads the db password and ports from it, and a
-# missing file silently deploys with the default password.
+# .env must exist and must set QS_DB_PASSWORD: compose reads the db password
+# and ports from it. .env.example ships QS_DB_PASSWORD empty on purpose, so
+# catch a copied-but-unedited file here with a useful message instead of
+# compose's bare "set QS_DB_PASSWORD in .env".
 if [ ! -f .env ]; then
   echo ".env is missing. Copy it and set QS_DB_PASSWORD before deploying:"
   echo "  cp .env.example .env && vi .env"
+  exit 1
+fi
+if [ -z "$(sed -n 's/^QS_DB_PASSWORD=//p' .env | tail -1)" ]; then
+  echo "QS_DB_PASSWORD is empty in .env. Compose will not start without it."
+  echo "  New install:      pick any password."
+  echo "  Existing install: use the password data/pg was created with"
+  echo "                    ('quadstick' if it was never set) -- NOT a new one."
+  echo "See 'Upgrading an existing install' in docs/DEPLOY-NAS.md."
   exit 1
 fi
 

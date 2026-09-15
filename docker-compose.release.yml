@@ -17,7 +17,9 @@ services:
     environment:
       POSTGRES_DB: quadstick
       POSTGRES_USER: quadstick
-      POSTGRES_PASSWORD: ${QS_DB_PASSWORD:-quadstick}
+      # No default on purpose; see docker-compose.yml. An EXISTING install must
+      # set the password its data directory was created with.
+      POSTGRES_PASSWORD: ${QS_DB_PASSWORD:?set QS_DB_PASSWORD in .env}
     volumes:
       - ${QS_PGDATA_HOST:-./data/pg}:/var/lib/postgresql/data
       - ${QS_BACKUP_HOST:-./data/backups}:/backups
@@ -31,7 +33,7 @@ services:
   api:
     image: ghcr.io/crypto69/quadstick-profile-studio-api:${APP_VERSION:-latest}
     environment:
-      QS_DATABASE_URL: postgresql+psycopg://quadstick:${QS_DB_PASSWORD:-quadstick}@db:5432/quadstick
+      QS_DATABASE_URL: postgresql+psycopg://quadstick:${QS_DB_PASSWORD:?set QS_DB_PASSWORD in .env}@db:5432/quadstick
       QS_SEED_ON_START: "1"
     volumes:
       - ${QS_EXPORTS_HOST:-./exports}:/app/exports

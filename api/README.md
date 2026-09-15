@@ -18,7 +18,12 @@ head`, seeds the catalogs from `core/qsprofile/catalog.py`, and imports the
 six fixtures with their game-action labels (idempotent; set
 `QS_SEED_ON_START=0` to skip). Exported CSVs are also written to the `exports`
 volume, to be exposed as an SMB share later. `QS_DB_PASSWORD` and
-`QS_API_PORT` can be set in a root `.env` (see `.env.example`).
+`QS_API_PORT` are set in a root `.env` (see `.env.example`).
+`QS_DB_PASSWORD` is **required**: both compose files reference it as
+`${QS_DB_PASSWORD:?…}`, so compose refuses to start without it rather than
+falling back to a password published in this repo. On an install whose
+database already exists, set it to the password that database was created with
+— see the upgrade note in `docs/DEPLOY-NAS.md` (Step 4).
 
 ## Run locally
 
@@ -27,15 +32,18 @@ python3.12 -m venv .venv && . .venv/bin/activate
 cd core && pip install -e ".[dev]" && cd ../api && pip install -e ".[dev,postgres]"
 
 # a Postgres, e.g. docker run -d --name qs_pg -e POSTGRES_DB=quadstick -e POSTGRES_USER=quadstick \
-#      -e POSTGRES_PASSWORD=quadstick -p 5432:5432 postgres:16-alpine
-export QS_DATABASE_URL=postgresql+psycopg://quadstick:quadstick@localhost:5432/quadstick
+#      -e POSTGRES_PASSWORD="$PGPASS" -p 5432:5432 postgres:16-alpine
+export QS_DATABASE_URL="postgresql+psycopg://quadstick:$PGPASS@localhost:5432/quadstick"
 alembic upgrade head
 python -m app.seed                    # catalogs + fixtures; --catalog-only to skip fixtures
 uvicorn app.main:app --reload
 ```
 
 Settings (env or `.env`, prefix `QS_`): `DATABASE_URL`, `EXPORTS_DIR`,
-`FIXTURES_DIR`, `ACTIONS_DIR`.
+`FIXTURES_DIR`, `ACTIONS_DIR`. `QS_DATABASE_URL` has **no default** — a default
+would have to carry a password — so the API raises a `ValidationError` on
+import if it is neither in the environment nor in `.env`. Docker compose and
+the desktop launcher both set it themselves.
 
 ## Tests
 

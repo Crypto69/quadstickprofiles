@@ -5,7 +5,7 @@
 #       --distpath desktop/dist --workpath desktop/build
 import sys
 from pathlib import Path
-from PyInstaller.utils.hooks import collect_data_files, collect_submodules, copy_metadata
+from PyInstaller.utils.hooks import collect_data_files, collect_submodules
 
 HERE = Path(SPECPATH).resolve()
 ROOT = HERE.parent
@@ -35,12 +35,6 @@ if VERSION_FILE.is_file():
     datas.append((str(VERSION_FILE), "."))
     first = (VERSION_FILE.read_text().splitlines() or [""])[0]
     APP_VERSION = first.partition("=")[2].strip() or "dev"
-
-for dist in ("qsapi", "qsprofile"):                           # /api/version reads qsapi's version
-    try:
-        datas += copy_metadata(dist)
-    except Exception:
-        pass
 
 hiddenimports = collect_submodules("app") + [
     "sqlalchemy.dialects.sqlite", "sqlalchemy.dialects.sqlite.pysqlite",

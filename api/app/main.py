@@ -1,7 +1,6 @@
 """FastAPI app. Everything is mounted under /api so the web container can serve
 the SPA at / and reverse-proxy /api to this service without a path rewrite."""
 import os
-from importlib.metadata import PackageNotFoundError, version as _package_version
 
 from fastapi import APIRouter, FastAPI
 from .csrf import install_csrf_guard
@@ -10,10 +9,10 @@ from .settings import settings
 
 API_PREFIX = "/api"
 
-try:                                    # api/pyproject.toml is the one place this number lives
-    API_VERSION = _package_version("qsapi")
-except PackageNotFoundError:            # running from a checkout without `pip install -e api`
-    API_VERSION = "dev"
+# scripts/version.sh is the single source of the version. deploy.sh, the release
+# workflow and the desktop build all stamp it into QS_APP_VERSION; the package
+# manifests deliberately do not carry it.
+API_VERSION = os.getenv("QS_APP_VERSION", "dev")
 
 app = FastAPI(title="QuadStick Profile Studio API", version=API_VERSION,
               openapi_url=f"{API_PREFIX}/openapi.json", docs_url=f"{API_PREFIX}/docs",
@@ -40,9 +39,8 @@ def health():
 def version():
     """What is actually running. deploy.sh stamps the image with the commit it
     built, so this is the answer to \"did my deploy land?\"."""
-    return {"version": app.version,
-            # the readable deploy number (1.0, 1.1 ...) computed by deploy.sh
-            "app_version": os.getenv("QS_APP_VERSION", "dev"),
+    # the readable deploy number (1.0, 1.1 ...) computed by scripts/version.sh
+    return {"app_version": os.getenv("QS_APP_VERSION", "dev"),
             "commit": os.getenv("QS_GIT_SHA", "unknown"),
             "built": os.getenv("QS_BUILD_TIME", "unknown")}
 

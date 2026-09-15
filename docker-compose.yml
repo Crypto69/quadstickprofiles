@@ -18,7 +18,11 @@ services:
     environment:
       POSTGRES_DB: quadstick
       POSTGRES_USER: quadstick
-      POSTGRES_PASSWORD: ${QS_DB_PASSWORD:-quadstick}
+      # No default on purpose: compose refuses to start rather than quietly
+      # creating the database with a password that is published in this repo.
+      # An EXISTING install must set the password its data directory was
+      # created with (see docs/DEPLOY-NAS.md and api/entrypoint.sh).
+      POSTGRES_PASSWORD: ${QS_DB_PASSWORD:?set QS_DB_PASSWORD in .env}
     volumes:
       # Bind-mounted inside the checkout, so the database sits on whichever
       # volume the repo was cloned onto, and is created by deploy.sh with the
@@ -45,7 +49,7 @@ services:
         BUILD_TIME: ${BUILD_TIME:-unknown}
         APP_VERSION: ${APP_VERSION:-dev}
     environment:
-      QS_DATABASE_URL: postgresql+psycopg://quadstick:${QS_DB_PASSWORD:-quadstick}@db:5432/quadstick
+      QS_DATABASE_URL: postgresql+psycopg://quadstick:${QS_DB_PASSWORD:?set QS_DB_PASSWORD in .env}@db:5432/quadstick
       QS_SEED_ON_START: "1"
     volumes:
       # Exported CSVs land here, inside the checkout. Point QS_EXPORTS_HOST at

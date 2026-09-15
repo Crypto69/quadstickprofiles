@@ -1,6 +1,6 @@
 [project]
 name = "qsapi"
-version = "0.2.0"
+version = "0.0.0"   # not the app version; scripts/version.sh is the single source
 description = "QuadStick Profile Studio API: FastAPI + SQLAlchemy 2 + Alembic over core/qsprofile"
 requires-python = ">=3.12"
 dependencies = [
