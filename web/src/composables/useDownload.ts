@@ -6,6 +6,9 @@
 // URL is unreliable inside a WebView, so there we reveal that file instead.
 import { desktopApi } from '@/desktop'
 
+/** How long the blob: URL is kept alive after the click; see `saveBlob`. */
+const REVOKE_DELAY_MS = 1000
+
 /**
  * Save a blob under `filename` through a transient download link, or, in the
  * desktop build with a known `exportPath`, reveal the file the server wrote.
@@ -26,6 +29,9 @@ export function saveBlob(
   a.href = url
   a.download = filename
   a.click()
-  URL.revokeObjectURL(url)
+  // Revoking straight after click() blanks or aborts the download in Safari and in
+  // some Firefox versions: the browser has not finished reading the blob yet. A
+  // second is far longer than any browser needs and costs only the blob's memory.
+  setTimeout(() => URL.revokeObjectURL(url), REVOKE_DELAY_MS)
   return 'downloaded'
 }

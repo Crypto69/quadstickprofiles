@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import FunctionPicker from './FunctionPicker.vue'
 import { useCatalogStore } from '@/stores/catalog'
 import { catalog, stubFetch } from '@/test/factories'
+import type { FunctionParam } from '@/api/types'
 
 /** The picker needs the real function list, including the ones that take parameters. */
 function fullCatalog() {
@@ -22,7 +23,7 @@ function fullCatalog() {
   })
 }
 
-async function setup(fn = 'normal', params: number[] = []) {
+async function setup(fn = 'normal', params: FunctionParam[] = []) {
   vi.stubGlobal('fetch', stubFetch({ '/api/catalog': fullCatalog() }))
   await useCatalogStore().load()
   return mount(FunctionPicker, { props: { fn, params } })
@@ -134,6 +135,29 @@ describe('FunctionPicker', () => {
       expect(box.attributes('step')).toBe('1')
       expect(box.attributes('max')).toBe('16383')
     }
+  })
+
+  // The file may hold a token the firmware cannot read as a number. A number box
+  // renders such a value blank, so the token would vanish from the screen and the
+  // first keystroke would silently delete it from the file.
+  it('shows a non-numeric parameter as text, flagged, instead of an empty box', async () => {
+    const w = await setup('repeat', ['five', 2000])
+    const boxes = w.findAll('.params input')
+    expect(boxes).toHaveLength(2)
+    expect(boxes[0]!.attributes('type')).toBe('text')
+    expect((boxes[0]!.element as HTMLInputElement).value).toBe('five')
+    expect(boxes[0]!.attributes('aria-invalid')).toBe('true')
+    expect(w.text()).toContain('the QuadStick reads it as 0')
+
+    // the numeric one beside it is unaffected
+    expect(boxes[1]!.attributes('type')).toBe('number')
+    expect(boxes[1]!.attributes('aria-invalid')).toBeUndefined()
+  })
+
+  it('replaces a non-numeric parameter with what is typed over it', async () => {
+    const w = await setup('repeat', ['five', 2000])
+    await w.findAll('.params input')[0]!.setValue('5')
+    expect((w.emitted('update')!.at(-1)! as [string, FunctionParam[]])[1]).toEqual([5, 2000])
   })
 
   it('takes that bound from the catalog, not from a number of its own', async () => {

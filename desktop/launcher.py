@@ -23,6 +23,8 @@ HERE = Path(__file__).resolve().parent
 if str(HERE) not in sys.path:               # so bundle_paths / desktop_api import when frozen
     sys.path.insert(0, str(HERE))
 
+from host_os import IS_MAC, IS_WINDOWS      # noqa: E402  (needs HERE on sys.path when frozen)
+
 log = logging.getLogger("desktop")
 
 
@@ -76,7 +78,7 @@ class SingleInstance:
     def acquire(self) -> bool:
         self.fh = open(self.path, "a+")
         try:
-            if os.name == "nt":
+            if IS_WINDOWS:
                 import msvcrt
                 msvcrt.locking(self.fh.fileno(), msvcrt.LK_NBLCK, 1)
             else:
@@ -90,10 +92,10 @@ class SingleInstance:
 def native_message(title: str, text: str):
     """A message the user can see when there is no window yet."""
     try:
-        if os.name == "nt":
+        if IS_WINDOWS:
             import ctypes
             ctypes.windll.user32.MessageBoxW(None, text, title, 0x40)   # MB_ICONINFORMATION
-        elif sys.platform == "darwin":
+        elif IS_MAC:
             import subprocess
             subprocess.run(["osascript", "-e",
                             f'display dialog "{text}" with title "{title}" buttons {{"OK"}}'])

@@ -15,6 +15,7 @@ from sqlalchemy.orm import sessionmaker
 os.environ["QS_DATABASE_URL"] = os.environ.get("QS_TEST_DATABASE_URL", "sqlite+pysqlite://")
 
 from app import models  # noqa: E402,F401
+from app.csrf import HEADER, REQUESTED_WITH
 from app.db import Base, make_engine, get_session
 from app.main import API_PREFIX, app
 from app.seed import seed_catalogs, seed_templates
@@ -23,6 +24,11 @@ from app.settings import settings
 REPO = pathlib.Path(__file__).resolve().parents[2]
 FIXTURES = REPO / "fixtures"
 ACTIONS = REPO / "actions"
+
+# Every client here speaks for the SPA, which sends this on every request; without
+# it the same-origin guard (app/csrf.py) refuses every POST/PUT/PATCH/DELETE.
+# test_csrf.py builds its own bare clients to prove that.
+SPA_HEADERS = {HEADER: REQUESTED_WITH}
 
 
 @pytest.fixture(scope="session")
@@ -76,7 +82,7 @@ def client(Session, tmp_path, monkeypatch):
         finally:
             db.close()
     app.dependency_overrides[get_session] = _session
-    with TestClient(app, base_url=f"http://testserver{API_PREFIX}") as c:
+    with TestClient(app, base_url=f"http://testserver{API_PREFIX}", headers=SPA_HEADERS) as c:
         yield c
     app.dependency_overrides.clear()
 
@@ -93,7 +99,7 @@ def root_client(Session, tmp_path, monkeypatch):
         finally:
             db.close()
     app.dependency_overrides[get_session] = _session
-    with TestClient(app) as c:
+    with TestClient(app, headers=SPA_HEADERS) as c:
         yield c
     app.dependency_overrides.clear()
 

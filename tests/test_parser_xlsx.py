@@ -111,3 +111,47 @@ def test_workbook_is_closed_even_when_parsing_fails(tmp_path, monkeypatch):
     with pytest.raises(RuntimeError):
         load(str(_workbook(tmp_path)))
     assert closed == [True]
+
+
+def test_gap_between_input_cells_is_closed_up_and_reported(tmp_path):
+    """N9, the workbook mirror of the CSV case: a hole between two filled input
+    cells is closed up on import, and reported because the row will re-export
+    shifted left."""
+    wb = Workbook()
+    _mode_sheet(wb.active, "Left joy", "Left joy",
+                [["increment_mode", "normal", "right_sip"],
+                 ["cross", "normal", "lip", None, "right_sip"]])
+    p = tmp_path / "gap.xlsx"
+    wb.save(p)
+    cfg, problems = load(str(p))
+    assert cfg.modes[0].mappings[1].inputs == ["lip", "right_sip"]
+    gaps = [x for x in problems if "empty input cell" in x[3]]
+    assert len(gaps) == 1, problems
+    assert gaps[0][0] == "info" and (gaps[0][1], gaps[0][2]) == (1, 5)
+    assert "column E" in gaps[0][3]
+
+
+# ------------------------------------------------------------------- W6: Infrared
+def test_an_infrared_sheet_is_refused_not_parsed_as_a_mode(tmp_path):
+    """Same rule as the CSV path: an IR sheet would be re-exported as `Profile Name`,
+    the header the firmware dispatches on, so refuse the file instead of storing it."""
+    wb = Workbook()
+    _mode_sheet(wb.active, "Left joy", "Left joy", [["increment_mode", "normal", "right_sip"]])
+    ws = wb.create_sheet("TV")
+    ws["A1"], ws["C1"] = "Infrared", "TV power"
+    ws["A4"] = "ir_code"
+    p = tmp_path / "ir.xlsx"
+    wb.save(p)
+
+    cfg, problems = load(str(p))
+    assert cfg.infrared_blocks == 1
+    assert len(cfg.modes) == 1
+    ir = [x for x in problems if "Infrared" in x[3]]
+    assert len(ir) == 1 and ir[0][0] == "error", problems
+    assert "TV" in ir[0][3]
+
+
+def test_a_workbook_with_no_infrared_sheet_counts_none(tmp_path):
+    cfg, problems = load(str(_workbook(tmp_path)))
+    assert cfg.infrared_blocks == 0
+    assert not [x for x in problems if "Infrared" in x[3]], problems

@@ -76,14 +76,19 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          # `built` is the freshly built app in desktop/dist; `binary` is the same
+          # executable's path *inside the zip*, which is what actually ships and so
+          # is what the final headless check runs (see N14 in the code review).
           - os: windows-latest
             label: windows-x64
             build: pwsh -File desktop/build.ps1
-            binary: desktop/dist/QuadStick Profile Studio/QuadStick Profile Studio.exe
+            built: desktop/dist/QuadStick Profile Studio/QuadStick Profile Studio.exe
+            binary: QuadStick Profile Studio/QuadStick Profile Studio.exe
           - os: macos-latest
             label: macos-arm64
             build: sh desktop/build.sh
-            binary: desktop/dist/QuadStick Profile Studio.app/Contents/MacOS/QuadStick Profile Studio
+            built: desktop/dist/QuadStick Profile Studio.app/Contents/MacOS/QuadStick Profile Studio
+            binary: QuadStick Profile Studio.app/Contents/MacOS/QuadStick Profile Studio
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -101,16 +106,122 @@ jobs:
             desktop/requirements.txt
       - run: pip install -e core -e api -r desktop/requirements.txt
         shell: bash
+      # Signing and notarisation need five of the owner's secrets (desktop/README.md
+      # lists them). Secrets cannot be tested in `if:` directly, so surface them as a
+      # flag. All five or none: a signed but un-notarised Developer ID app is still
+      # blocked by Gatekeeper, so a partial set would produce a build that claims to
+      # be signed and still will not open. Fail fast instead of releasing that.
+      - name: Are the macOS signing secrets present?
+        id: signing
+        if: runner.os == 'macOS'
+        env:
+          MACOS_CERT_P12: ${{ secrets.MACOS_CERT_P12 }}
+          MACOS_CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER_ID: ${{ secrets.APPLE_API_ISSUER_ID }}
+          APPLE_API_KEY_P8: ${{ secrets.APPLE_API_KEY_P8 }}
+        run: |
+          all="MACOS_CERT_P12 MACOS_CERT_PASSWORD APPLE_API_KEY_ID APPLE_API_ISSUER_ID APPLE_API_KEY_P8"
+          present=""; missing=""
+          for v in $all; do
+            if [ -n "${!v}" ]; then present="$present $v"; else missing="$missing $v"; fi
+          done
+          if [ -z "$missing" ]; then
+            echo "all five macOS signing secrets are set: signing and notarising"
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          elif [ -z "$present" ]; then
+            echo "no macOS signing secrets are set: building unsigned"
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "::error::macOS signing secrets are incomplete (missing:$missing). Set all five or none."
+            exit 1
+          fi
+        shell: bash
+      - name: Import the Developer ID certificate into a throwaway keychain
+        if: steps.signing.outputs.enabled == 'true'
+        env:
+          MACOS_CERT_P12: ${{ secrets.MACOS_CERT_P12 }}
+          MACOS_CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
+        run: |
+          keychain="$RUNNER_TEMP/signing.keychain-db"
+          pw="$(uuidgen)"
+          security create-keychain -p "$pw" "$keychain"
+          security set-keychain-settings -lut 21600 "$keychain"
+          security unlock-keychain -p "$pw" "$keychain"
+          echo "$MACOS_CERT_P12" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security import "$RUNNER_TEMP/cert.p12" -P "$MACOS_CERT_PASSWORD" -A -t cert -f pkcs12 -k "$keychain"
+          rm -f "$RUNNER_TEMP/cert.p12"
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$pw" "$keychain" > /dev/null
+          security list-keychains -d user -s "$keychain" login.keychain-db
+          # Only this keychain, so a Developer ID that happens to live in the
+          # runner's login keychain cannot make the match ambiguous, and pin the
+          # exact certificate by hash for sign.sh (see N15 in the code review).
+          line="$(security find-identity -v -p codesigning "$keychain" | grep -F "Developer ID Application")"
+          n="$(printf '%s' "$line" | grep -c .)"
+          [ "$n" -eq 1 ] || { echo "::error::expected one Developer ID Application certificate in the throwaway keychain, found $n"; echo "$line"; exit 1; }
+          echo "$line"
+          echo "CODESIGN_IDENTITY=$(printf '%s\n' "$line" | sed -n 's/^ *[0-9][0-9]*) \([0-9A-Fa-f]\{40\}\) .*/\1/p')" >> "$GITHUB_ENV"
+        shell: bash
       - name: Build
         run: ${{ matrix.build }}
         shell: bash
-      - name: Headless check of the built app
-        run: sh scripts/desktop_check.sh "${{ matrix.binary }}"
+      # Cheap: fails a broken build before we wait on Apple. The check that counts
+      # is the one below, on the contents of the zip that is uploaded.
+      - name: Headless check of the app as built
+        run: sh scripts/desktop_check.sh "${{ matrix.built }}"
+        shell: bash
+      - name: Notarise with Apple and staple the ticket
+        if: steps.signing.outputs.enabled == 'true'
+        env:
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER_ID: ${{ secrets.APPLE_API_ISSUER_ID }}
+          APPLE_API_KEY_P8: ${{ secrets.APPLE_API_KEY_P8 }}
+        run: |
+          export APPLE_API_KEY_PATH="$RUNNER_TEMP/AuthKey.p8"
+          echo "$APPLE_API_KEY_P8" | base64 --decode > "$APPLE_API_KEY_PATH"
+          for zip in "desktop/dist/QuadStickProfileStudio-${{ needs.version.outputs.app_version }}-macos-"*.zip; do break; done
+          [ -f "$zip" ] || { echo "::error::no macOS zip for ${{ needs.version.outputs.app_version }} in desktop/dist"; ls -l desktop/dist; exit 1; }
+          sh desktop/notarize.sh "desktop/dist/QuadStick Profile Studio.app" "$zip"
+          rm -f "$APPLE_API_KEY_PATH"
+          # Written only after notarize.sh succeeded, so the release notes can say
+          # "signed and notarised" on the strength of this file and nothing else.
+          # A matrix job cannot use `outputs:` for this (both legs share one map,
+          # and the Windows leg would overwrite it with an empty value).
+          echo "notarised $(date -u +%FT%TZ)" > desktop/dist/macos-notarised.txt
+        shell: bash
+      # N14: the zip is unpacked and launched, so what ships is what was tested.
+      # ditto on macOS (keeps exec bits and the stapled bundle intact); the zipfile
+      # module on Windows, where there is no ditto and exec bits do not exist.
+      - name: Headless check of the app inside the zip that ships
+        run: |
+          dir="$RUNNER_TEMP/release-zip"
+          rm -rf "$dir"; mkdir -p "$dir"
+          # Pinned to this release's version, so a stale zip left in desktop/dist
+          # (possible locally, never on a fresh runner) cannot be checked instead.
+          for zip in "desktop/dist/QuadStickProfileStudio-${{ needs.version.outputs.app_version }}-"*.zip; do break; done
+          [ -f "$zip" ] || { echo "::error::no zip for ${{ needs.version.outputs.app_version }} in desktop/dist"; ls -l desktop/dist; exit 1; }
+          echo "unpacking $zip"
+          if [ "$RUNNER_OS" = "macOS" ]; then
+            ditto -x -k "$zip" "$dir"
+          else
+            python -m zipfile -e "$zip" "$dir"
+          fi
+          if [ "${{ steps.signing.outputs.enabled }}" = "true" ]; then
+            app="$dir/QuadStick Profile Studio.app"
+            codesign --verify --deep --strict --verbose=2 "$app"
+            xcrun stapler validate "$app"
+            spctl --assess --type execute -vv "$app"
+          fi
+          sh scripts/desktop_check.sh "$dir/${{ matrix.binary }}"
         shell: bash
       - uses: actions/upload-artifact@v4
         with:
           name: desktop-${{ matrix.label }}
-          path: desktop/dist/*.zip
+          # The marker travels with the zips; `files:` in the release job matches
+          # only *.zip, so it is never attached to the release itself.
+          path: |
+            desktop/dist/*.zip
+            desktop/dist/macos-notarised.txt
           if-no-files-found: error
 
   release:
@@ -131,6 +242,15 @@ jobs:
           cp .env.example env.example
           v='${{ needs.version.outputs.app_version }}'
           owner="$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')"
+          # The desktop job writes this marker only after notarize.sh succeeded, so
+          # a fork without the signing secrets gets the Gatekeeper instructions
+          # instead of a promise the build cannot keep (W15).
+          if [ -f artifacts/macos-notarised.txt ]; then
+            mac='Signed and notarised with Apple, so it opens like any other app.'
+          else
+            # shellcheck disable=SC2016  # the backticks and quotes are literal Markdown
+            mac='This build is unsigned, so the first time you open it, right-click the app → *Open* and confirm (or run `xattr -dr com.apple.quarantine "QuadStick Profile Studio.app"`).'
+          fi
           cat > notes.md <<EOF_NOTES
           ## Run it
 
@@ -141,8 +261,8 @@ jobs:
           unsigned, so SmartScreen shows "Windows protected your PC" once: click
           *More info* → *Run anyway*.
 
-          **macOS (Apple Silicon):** \`QuadStickProfileStudio-$v-macos-arm64.zip\`. The
-          build is unsigned, so the first time right-click the app → *Open*.
+          **macOS (Apple Silicon):** \`QuadStickProfileStudio-$v-macos-arm64.zip\`.
+          $mac
 
           Where your data and exports live: \`desktop/README.md\`.
 

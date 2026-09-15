@@ -29,12 +29,16 @@ def action_for(actions, mode, output):
 def fn_tag(m):
     if m.function in ("normal", ""):          # an empty cell is normal to the device
         return ""
-    p = " ".join(str(x) for x in m.params)
+    # params are free text by design (the parser keeps a bad token so the editor can
+    # show the row), and an imported function name need not be a known keyword, so
+    # both are escaped here like every other user string on the card.
+    p = esc(" ".join(str(x) for x in m.params))
     words = {"toggle": "toggle", "repeat": "auto-fire", "pulse": "tap", "delay_on": "after delay",
              "delay_off": "held after release", "tap": "tap", "delayed_latch": "hold to latch",
              "force_off": "release", "duty": "pressure", "greater_than": "above",
              "less_than": "below", "increment_value": "step up", "decrement_value": "step down"}
-    return f'<span class="fn">{words.get(m.function, m.function)}{(" " + p) if p else ""}</span>'
+    word = esc(words.get(m.function, m.function))
+    return f'<span class="fn">{word}{(" " + p) if p else ""}</span>'
 
 
 def glyphs(console):
@@ -205,7 +209,7 @@ def switching(cfg):
     for m in cfg.modes[0].active():
         if m.output in MODE_CHANGE_OUTPUTS:
             c = classify_input(m.inputs[0])
-            lines.append(f"{esc(c['label'] if c else m.inputs[0])} → {GLYPH.get(m.output, m.output)}")
+            lines.append(f"{esc(c['label'] if c else m.inputs[0])} → {esc(GLYPH.get(m.output, m.output))}")
     return lines
 
 

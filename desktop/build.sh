@@ -18,6 +18,15 @@ python -m PyInstaller --noconfirm --clean desktop/quadstick.spec \
 case "$(uname -s)" in
   Darwin)
     arch="$(uname -m)"                      # arm64 or x86_64
+    # sign.sh does the real resolving (and refuses an ambiguous match); this is
+    # only "is there anything to sign with at all?", so a checkout without a
+    # certificate still builds.
+    identity="${CODESIGN_IDENTITY:-Developer ID Application}"
+    if security find-identity -v -p codesigning | grep -qF "$identity"; then
+      sh desktop/sign.sh "desktop/dist/QuadStick Profile Studio.app"
+    else
+      echo "no codesigning identity matching '$identity' in the keychain: leaving the app unsigned"
+    fi
     out="desktop/dist/QuadStickProfileStudio-${APP_VERSION}-macos-${arch}.zip"
     rm -f "$out"
     # ditto keeps the .app's resource forks and permissions; plain zip does not

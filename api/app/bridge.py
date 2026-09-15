@@ -1,7 +1,5 @@
 """DB rows <-> qsprofile.Config. Every parse / validate / convert / write /
 render call goes through core/qsprofile; this module only shuttles data."""
-import importlib
-from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from qsprofile import Config, Mode as CMode, Mapping as CMapping, validate
 from qsprofile import catalog as C
@@ -15,8 +13,9 @@ def ensure_output(db: Session, name: str):
     """Regex-family outputs (kb_*, ir_*) are valid without being pre-seeded;
     add them to the catalog on first sight so the FK holds. Unknown -> ValueError.
     Two requests can meet here on the same new name, so the insert is
-    `ON CONFLICT DO NOTHING` (Postgres and SQLite both have it): the loser
-    simply finds the row already there instead of failing the whole request."""
+    `ON CONFLICT DO NOTHING`: the loser simply finds the row already there
+    instead of failing the whole request. Postgres and SQLite are the only two
+    backends this project supports, and both have it."""
     if db.get(M.OutputCatalog, name):
         return
     grp = output_family_group(name)
@@ -24,16 +23,13 @@ def ensure_output(db: Session, name: str):
         raise ValueError(f"Unknown output '{name}'")
     row = dict(name=name, grp=grp, label=C.output_label(name), sort_order=10_000)
     dialect = db.get_bind().dialect.name
-    if dialect in ("postgresql", "sqlite"):
-        insert = importlib.import_module(f"sqlalchemy.dialects.{dialect}").insert
-        db.execute(insert(M.OutputCatalog).values(**row).on_conflict_do_nothing(index_elements=["name"]))
-    else:                                   # no upsert on this backend; a savepoint isolates the clash
-        try:
-            with db.begin_nested():
-                db.add(M.OutputCatalog(**row))
-                db.flush()
-        except IntegrityError:
-            pass
+    if dialect == "postgresql":
+        from sqlalchemy.dialects.postgresql import insert
+    elif dialect == "sqlite":
+        from sqlalchemy.dialects.sqlite import insert
+    else:
+        raise RuntimeError(f"unsupported database backend '{dialect}'")
+    db.execute(insert(M.OutputCatalog).values(**row).on_conflict_do_nothing(index_elements=["name"]))
 
 
 def check_input(name: str):

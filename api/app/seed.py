@@ -42,13 +42,22 @@ FIXTURES = {
 
 
 def _upsert(db: Session, model, rows):
+    """One SELECT per table instead of a `db.get` per row (538 round-trips on every
+    container start and every desktop launch). Existing rows still have their fields
+    refreshed from the catalog, so a renamed label reaches an already-seeded database;
+    only fields that actually differ are written, so unchanged rows stay clean.
+    Rows this seed does not know about (ensure_output's kb_* / ir_*) are left alone."""
+    existing = {o.name: o for o in db.scalars(select(model))}
+    new = []
     for r in rows:
-        obj = db.get(model, r["name"])
+        obj = existing.get(r["name"])
         if obj is None:
-            db.add(model(**r))
+            new.append(model(**r))
         else:
             for k, v in r.items():
-                setattr(obj, k, v)
+                if getattr(obj, k) != v:
+                    setattr(obj, k, v)
+    db.add_all(new)
 
 
 def seed_catalogs(db: Session):

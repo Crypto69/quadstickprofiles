@@ -45,6 +45,15 @@ def test_fixtures_have_no_validation_errors():
         assert not [p for p in validate(cfg, problems) if p[0] == "error"], f.name
 
 
+def test_no_fixture_has_a_gap_between_input_cells():
+    """N9: the gap info means a row will re-export shifted left, which would break the
+    byte-identical round trip above. No fixture has one, and this is the guard that
+    says so if a future fixture does."""
+    for f in FX.iterdir():
+        _, problems = load(str(f))
+        assert not [p for p in problems if "empty input cell" in p[3]], f.name
+
+
 def test_validator_catches_known_fortnite_issues():
     cfg, problems = load(str(FX / "ddfortnite.xlsx"))
     findings = validate(cfg, problems)

@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { saveBlob } from './useDownload'
 
 function trapAnchors() {
@@ -16,11 +16,16 @@ function trapAnchors() {
 }
 
 describe('saveBlob', () => {
+  beforeEach(() => {
+    vi.useFakeTimers()
+  })
+
   afterEach(() => {
+    vi.useRealTimers()
     delete window.pywebview
   })
 
-  it('clicks a download link for the blob and releases the object URL', () => {
+  it('clicks a download link for the blob and releases the object URL later', () => {
     const anchors = trapAnchors()
     const create = vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:one')
     const revoke = vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {})
@@ -33,6 +38,12 @@ describe('saveBlob', () => {
     expect(anchors[0]!.getAttribute('href')).toBe('blob:one')
     expect(anchors[0]!.download).toBe('ddfortnite.csv')
     expect(anchors[0]!.click).toHaveBeenCalledTimes(1)
+    // Revoking in the same tick as the click blanks the download in Safari and in
+    // some Firefox versions: the browser has not read the blob yet.
+    expect(revoke).not.toHaveBeenCalled()
+
+    vi.runAllTimers()
+    expect(revoke).toHaveBeenCalledTimes(1)
     expect(revoke).toHaveBeenCalledWith('blob:one')
   })
 

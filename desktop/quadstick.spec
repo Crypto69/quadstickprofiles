@@ -24,8 +24,18 @@ datas += [
     (str(ROOT / "fixtures"), "fixtures"),
     (str(ROOT / "actions"), "actions"),
     (str(ROOT / "api" / "alembic"), "alembic"),               # env.py + versions/, loaded by path
-    (str(HERE / "version.txt"), "."),
 ]
+
+# version.txt is written by build.sh / build.ps1 and is gitignored, so running
+# this spec directly on a clean tree must still work: bundle it only if it is
+# there, and fall back to "dev" for the bundle's version string.
+VERSION_FILE = HERE / "version.txt"
+APP_VERSION = "dev"
+if VERSION_FILE.is_file():
+    datas.append((str(VERSION_FILE), "."))
+    first = (VERSION_FILE.read_text().splitlines() or [""])[0]
+    APP_VERSION = first.partition("=")[2].strip() or "dev"
+
 for dist in ("qsapi", "qsprofile"):                           # /api/version reads qsapi's version
     try:
         datas += copy_metadata(dist)
@@ -71,11 +81,10 @@ if sys.platform == "darwin":
         coll,
         name=f"{NAME}.app",
         icon=icon,
-        bundle_identifier="com.quadstick.profilestudio",
+        bundle_identifier="ai.myaccessibility.quadstickprofilestudio",
         info_plist={
             "NSHighResolutionCapable": True,
             "LSMinimumSystemVersion": "12.0",
-            "CFBundleShortVersionString": (HERE / "version.txt").read_text().split("\n")[0].split("=")[-1]
-            if (HERE / "version.txt").is_file() else "dev",
+            "CFBundleShortVersionString": APP_VERSION,
         },
     )

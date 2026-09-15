@@ -4,11 +4,11 @@ Two calls, both narrow on purpose: reveal a file the API wrote into the exports
 folder, and open one of this app's own URLs in the system browser (that is where
 printing happens; a WebView has no print dialog and cannot open tabs)."""
 import logging
-import os
 import subprocess
-import sys
 import webbrowser
 from pathlib import Path
+
+from host_os import IS_MAC, IS_WINDOWS
 
 log = logging.getLogger("desktop.api")
 
@@ -24,9 +24,9 @@ class DesktopApi:
             log.warning("reveal refused: %s", path)
             return
         log.info("reveal %s", target)
-        if sys.platform == "darwin":
+        if IS_MAC:
             subprocess.Popen(["open", "-R", str(target)])
-        elif os.name == "nt":
+        elif IS_WINDOWS:
             subprocess.Popen(["explorer", f"/select,{target}"])
         else:
             subprocess.Popen(["xdg-open", str(target.parent)])

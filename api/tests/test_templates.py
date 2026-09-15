@@ -166,3 +166,24 @@ def test_the_seeded_starters_export_their_fixture_bytes(client, db, tmp_path):
 def test_an_imported_profile_is_not_a_template(client):
     got = upload(client, FIXTURES / "cod.csv")
     assert got["profile"]["is_template"] is False
+
+
+def test_the_three_copy_paths_all_carry_the_preferences_and_the_labels(client):
+    """N3: the labels are copied by hand (they are not part of the Config); the
+    preferences and the mode rows ride along with it. All three must agree."""
+    t = _template(client)
+    made = [
+        client.post(f"/profiles/from-template/{t['id']}",
+                    json={"name": "From template", "csv_filename": "ft.csv"}).json(),
+        client.post(f"/profiles/{t['id']}/duplicate").json(),
+        client.post(f"/profiles/{t['id']}/convert", json={"target": "xbox"}).json()["profile"],
+    ]
+    for new in made:
+        assert new["preferences"] == {"mouse_speed": "120"}, new["name"]
+        assert new["input_names"] == {"lip": "Chin switch"}, new["name"]
+        assert [(g["output"], g["action"]) for g in new["game_actions"]] == [("right_2", "Fire")], new["name"]
+        assert [m["output"] for m in new["modes"][0]["mappings"]] == \
+               [m["output"] for m in t["modes"][0]["mappings"]], new["name"]
+        # one row each, not two: the preferences are copied once
+        assert len(new["preferences"]) == 1 and len(new["input_names"]) == 1
+        assert len(new["game_actions"]) == 1

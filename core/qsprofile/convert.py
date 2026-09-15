@@ -43,36 +43,50 @@ def convert(cfg, target):
     return new, notes
 
 
+def _text(ws, row, col, value):
+    """openpyxl types a str starting with '=' as a formula and '#N/A' as an error; force text.
+
+    Everything the app writes into a mode sheet is a keyword, a label or a free-text
+    note — never a calculation. A comment like '=> use for jump' stored as a formula
+    makes Excel call the workbook corrupt, and '=HYPERLINK(...)' would run."""
+    c = ws.cell(row, col, value)
+    c.data_type = "s"
+    return c
+
+
 def write_xlsx(cfg, path, filename=None):
     """Write the config in the template layout (A1 type, A2 filename, A3 header,
-    rows from 4, comments in K)."""
+    rows from 4, comments in K). Every string cell is written as text, never as a
+    formula (see `_text`)."""
     wb = Workbook()
     wb.remove(wb.active)
     used = {"preferences"}                       # that sheet comes last and keeps its name
     for mode in cfg.modes:
         ws = wb.create_sheet(sheet_title(mode.name or mode.label, used, f"Mode {mode.number}"))
-        ws["A1"], ws["C1"] = "Profile Name", mode.label
+        _text(ws, 1, 1, "Profile Name"); _text(ws, 1, 3, mode.label)
         if mode.number == 1:
-            ws["A2"] = filename or cfg.filename
-        ws["C2"] = "Normal"
-        ws["A3"], ws["B3"], ws["C3"] = HEADER_A3[cfg.console], "Function", mode.channel or "usb"
+            _text(ws, 2, 1, filename or cfg.filename)
+        _text(ws, 2, 3, "Normal")
+        _text(ws, 3, 1, HEADER_A3[cfg.console])
+        _text(ws, 3, 2, "Function")
+        _text(ws, 3, 3, mode.channel or "usb")
         r = 4
         for m in mode.mappings:
             if m.kind == "preference":            # A = key, B as read (ignored by the device), C = value
-                ws.cell(r, 1, m.output); ws.cell(r, 3, m.value)
+                _text(ws, r, 1, m.output); _text(ws, r, 3, m.value)
                 if m.function:
-                    ws.cell(r, 2, m.function)
+                    _text(ws, r, 2, m.function)
                 if m.comment:
-                    ws.cell(r, 11, m.comment)
+                    _text(ws, r, 11, m.comment)
                 r += 1
                 continue
-            ws.cell(r, 1, display_output(m.output, cfg.console))
+            _text(ws, r, 1, display_output(m.output, cfg.console))
             fn = m.function + ("" if not m.params else " " + " ".join(str(p) for p in m.params))
-            ws.cell(r, 2, fn)
+            _text(ws, r, 2, fn)
             for i, inp in enumerate(m.inputs[:8]):
-                ws.cell(r, 3 + i, inp)
+                _text(ws, r, 3 + i, inp)
             if m.comment:
-                ws.cell(r, 11, m.comment)
+                _text(ws, r, 11, m.comment)
             r += 1
     ws = wb.create_sheet("Preferences")
     ws["A1"] = "Preferences"

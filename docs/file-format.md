@@ -26,7 +26,11 @@ unused and harmless.
 
 Mode sheet (A1 `Profile Name`; the firmware only checks that the line **starts
 with** `Profile`, case-sensitive — same for `Preferences` and `Infrared` — so the
-parser accepts any such A1 with an info, and export writes the canonical text):
+parser accepts any such A1 with an info, and export writes the canonical text). An
+`Infrared` block is recognised but not supported — it is counted, reported as an
+error and never parsed as a mode, because `write_csv` writes `Profile Name` for every
+mode and would therefore re-export it as a profile block. Its layout is undocumented
+here; verifying it needs a real device file with an IR block as a fixture:
 
 | cell | content |
 |---|---|
@@ -40,9 +44,18 @@ parser accepts any such A1 with an info, and export writes the canonical text):
 | A4.. | output name |
 | B4.. | output function, optionally with numeric params: `repeat 5 2000` |
 | C4..J | input(s). C is the input; D–J hold extra inputs for sequences |
-| K.. | free-text comments (never exported to the device) |
+| K.. | free-text comments (never reach the device; column K round-trips through `.xlsx`) |
 
 The first blank A cell ends the sheet: rows after it are ignored by the device.
+
+An empty cell between two filled ones in C..J is closed up on import (the model
+stores a plain ordered list), so such a row re-exports shifted left. The order is
+kept and it is reported as an info; what the firmware makes of a gap is unverified.
+
+Every string cell `write_xlsx` writes is forced to text (`convert._text`). openpyxl
+types a value starting with `=` as a formula and `#N/A` as an error value, so a
+comment like `=> use for jump` otherwise produced a workbook Excel calls corrupt,
+and `=HYPERLINK(...)` would have run when the owner opened it.
 
 Sheet (tab) names are Excel's business, not the device's: `write_xlsx` replaces
 `[ ] : * ? / \` with `-`, cuts at 31 characters and appends ` 2`, ` 3`, … to a
@@ -95,6 +108,9 @@ read-only. `fixtures/synthetic_pref_override.csv` is the hand-built example.
 ## Device CSV (what the add-on's "Save as CSV" / QMP writes)
 
 ASCII, **CRLF** line endings, every data line ends with a **trailing comma**.
+`write_csv` encodes strict ASCII and refuses anything else. On import a UTF-8 BOM is
+accepted and stripped; a file re-saved as "ANSI" is read as Windows-1252 with a
+warning naming the line and the byte, rather than raising before anything can be said.
 
 ```
 QuadStick Configuration,Version 1.4,<google sheet url or blank>,<sheet title>

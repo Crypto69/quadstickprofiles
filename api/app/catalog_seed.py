@@ -4,14 +4,23 @@ from qsprofile import catalog as C
 
 
 def input_rows():
-    names = list(C.all_mouthpiece_inputs())
+    # Every name classify_input() accepts must be seeded: the API pre-check uses
+    # classify_input(), so anything it passes and this misses fails the
+    # mapping_inputs foreign key with a 500 instead (C1). Derive the tubes from
+    # C.TUBES, not TUBE_ORDER, so right_mode cannot be dropped again; the
+    # card-grid order stays TUBE_ORDER first, the rest after it.
+    tubes = C.TUBE_ORDER + [t for t in C.TUBES if t not in C.TUBE_ORDER]
+    names = [f"mp_{t}_{a}{s}" for t in tubes for a in ("sip", "puff") for s in ("", "_soft")]
     names += [f"right_{a}{s}" for a in ("sip", "puff") for s in ("", "_soft")]
     names += ["lip", "lip_soft"]
-    names += [f"{d}{r}" for d in C.JOY_DIRS + C.JOY_ZONES for r in ("", "_inner")] + ["center"]
+    names += [f"{d}{r}" for d in C.JOY_DIRS + C.JOY_ZONES for r in ("", "_inner")]
+    names += ["center", "any_direction"]
     names += [f"digital_in_{n}" for n in range(1, 9)]
     names += [f"usb_{u}_{d}{r}" for u in (1, 2)
-              for d in C.JOY_DIRS + C.JOY_ZONES + [f"button_{n}" for n in range(1, 16)]
+              for d in C.JOY_DIRS + C.JOY_ZONES + [f"button_{n}" for n in range(1, 17)]
               for r in ("", "_inner")]
+    # not a sensor: `constant` is always on, `none` is an explicit placeholder.
+    names += list(C.SPECIAL_INPUTS)
     # older firmware input names: still accepted by 2373, so the FK must hold for a
     # profile that uses one. classify_input() marks them kind="legacy" and the
     # validator warns; they are sorted last so the UI never offers them first.

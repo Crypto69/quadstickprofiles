@@ -45,3 +45,7 @@ class Config:
     console: str = "playstation"   # naming set used in the source sheet
     source_url: str = ""           # Google Sheet URL from the CSV header, if any
     format_version: str = "Version 1.4"
+    infrared_blocks: int = 0       # W6: counted, never parsed. An IR block is a valid
+                                   # QuadStick block this tool cannot represent; treating
+                                   # it as a mode would re-export it as `Profile Name`,
+                                   # which is the header the firmware dispatches on.

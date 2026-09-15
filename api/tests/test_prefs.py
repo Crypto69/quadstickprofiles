@@ -110,8 +110,10 @@ def test_the_drive_hiding_check_follows_the_firmware_given(client):
     assert client.get("/prefs/export.csv", params={"firmware": 2373}).status_code == 409
     # the default is the owner's firmware; an unknown one is refused
     assert client.get("/prefs").json()["validation"]["errors"] == 1
-    assert client.get("/prefs", params={"firmware": 9999}).status_code == 422
+    r = client.get("/prefs", params={"firmware": 9999})
+    assert r.status_code == 422 and "Unknown firmware 9999" in r.text and "2373" in r.text
     assert client.put("/prefs", json=body, params={"firmware": 9999}).status_code == 422
+    assert client.get("/prefs/export.csv", params={"firmware": 9999}).status_code == 422
 
 
 def test_export_is_the_prefs_csv_the_device_reads(client, tmp_path):

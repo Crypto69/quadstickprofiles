@@ -3,9 +3,10 @@
 // from the catalog, so the UI can never offer a function the firmware rejects.
 import { computed } from 'vue'
 import { useCatalogStore } from '@/stores/catalog'
+import type { FunctionParam } from '@/api/types'
 
-const props = defineProps<{ fn: string; params: number[] }>()
-const emit = defineEmits<{ update: [fn: string, params: number[]] }>()
+const props = defineProps<{ fn: string; params: FunctionParam[] }>()
+const emit = defineEmits<{ update: [fn: string, params: FunctionParam[]] }>()
 
 const catalog = useCatalogStore()
 
@@ -86,6 +87,16 @@ const maxParam = computed(() => catalog.catalog?.limits.max_function_param ?? 16
 
 const paramMeta = computed(() => (PARAM_META[fnName.value] ?? []).slice(0, maxParams.value))
 
+/**
+ * A parameter the file holds as a non-numeric token. It round-trips untouched, so
+ * the box has to show it rather than render blank — a `type="number"` input drops a
+ * value it cannot parse, and typing over the blank would silently delete the token
+ * without the user ever seeing what was there.
+ */
+function isText(i: number) {
+  return typeof props.params[i] === 'string'
+}
+
 function pick(name: string) {
   // A newly chosen function starts bare, the way every row in the fixtures is
   // written: the firmware applies its own defaults when a parameter is absent, and
@@ -133,15 +144,20 @@ function setParam(i: number, raw: string) {
         <input
           :id="`p${i}`"
           class="input"
-          type="number"
+          :type="isText(i) ? 'text' : 'number'"
           inputmode="numeric"
           min="0"
           step="1"
           :max="maxParam"
+          :aria-invalid="isText(i) || undefined"
           :value="params[i] ?? ''"
           :placeholder="String(m.default)"
           @input="setParam(i, ($event.target as HTMLInputElement).value)"
         />
+        <p v-if="isText(i)" class="hint hint--warn" role="alert">
+          <b class="mono">{{ params[i] }}</b> is not a whole number; the QuadStick reads it as
+          0. Type a number to replace it.
+        </p>
         <p class="hint">{{ m.hint }}</p>
       </div>
     </div>
@@ -159,6 +175,10 @@ function setParam(i: number, raw: string) {
   padding: var(--sp-2) var(--sp-3);
   background: var(--paper-sunk);
   border-radius: var(--radius);
+}
+.hint--warn {
+  color: var(--warning);
+  font-weight: 600;
 }
 .params {
   display: grid;

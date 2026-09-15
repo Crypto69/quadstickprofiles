@@ -1,7 +1,7 @@
 import { createPinia, setActivePinia } from 'pinia'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { fromProfile, toBody, useDocumentStore } from './document'
-import { budget, editableProfile, stubFetch, validation } from '@/test/factories'
+import { budget, deferredFetch, editableProfile, stubFetch, validation } from '@/test/factories'
 
 function routes(extra: Record<string, unknown> = {}) {
   return {
@@ -16,31 +16,6 @@ async function loaded(extra: Record<string, unknown> = {}) {
   const store = useDocumentStore()
   await store.load(1)
   return store
-}
-
-/**
- * A fetch whose answers the test releases itself, in any order — for the race
- * tests, where what matters is which response lands last, not which was sent last.
- */
-function deferredFetch() {
-  const calls: { key: string; release: (body: unknown, status?: number) => void }[] = []
-  const fetch = vi.fn(
-    (input: RequestInfo | URL, init?: RequestInit) =>
-      new Promise<Response>((resolve) => {
-        const url = typeof input === 'string' ? input : input.toString()
-        calls.push({
-          key: `${init?.method ?? 'GET'} ${url}`,
-          release: (body, status = 200) =>
-            resolve(
-              new Response(JSON.stringify(body), {
-                status,
-                headers: { 'Content-Type': 'application/json' },
-              }),
-            ),
-        })
-      }),
-  )
-  return { fetch, calls }
 }
 
 describe('fromProfile / toBody', () => {
@@ -81,6 +56,17 @@ describe('fromProfile / toBody', () => {
     // own channel, so neither is a profile attribute any more
     expect(body).not.toHaveProperty('emulation_mode')
     expect(body).not.toHaveProperty('channel')
+  })
+
+  it('round-trips a non-numeric function parameter instead of dropping it', () => {
+    // The API keeps a token the firmware cannot read as a number (it reads 0); the
+    // editor must hand it back byte for byte rather than silently rewriting the file.
+    const p = editableProfile()
+    p.modes[0]!.mappings[0]!.function = 'repeat'
+    p.modes[0]!.mappings[0]!.params = ['five', 2000]
+    const doc = fromProfile(p)
+    expect(doc.modes[0]!.mappings[0]!.params).toEqual(['five', 2000])
+    expect(toBody(doc).modes![0]!.mappings[0]!.params).toEqual(['five', 2000])
   })
 
   it('keeps the emulation mode as the enable_DS3_emulation preference row', () => {
@@ -193,6 +179,136 @@ describe('document store', () => {
     expect(store.error).toContain('bad filename')
     expect(store.doc?.csv_filename).toBe('bad name.csv') // still there to fix
     expect(store.dirty).toBe(true)
+  })
+
+  it('a failed load forgets the profile it replaced, id included', async () => {
+    // The store outlives the view and the route watcher skips load() when the route
+    // id already equals this one, so a stale id here would pin the 404 for good.
+    const store = await loaded()
+    expect(store.id).toBe(1)
+    vi.stubGlobal(
+      'fetch',
+      stubFetch({
+        '/api/profiles/2': { status: 404, body: JSON.stringify({ detail: 'Profile not found' }) },
+      }),
+    )
+    await store.load(2)
+    expect(store.error).toContain('Profile not found')
+    expect(store.id).toBeNull()
+    expect(store.doc).toBeNull()
+    expect(store.validation).toBeNull()
+    expect(store.selectedModeKey).toBeNull()
+    expect(store.dirty).toBe(false)
+    expect(store.loading).toBe(false)
+  })
+})
+
+describe('concurrent saves', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    vi.unstubAllGlobals()
+  })
+
+  /** Answer every check still outstanding, so none is left armed for the next test. */
+  let drain: (() => void) | null = null
+  afterEach(async () => {
+    // the live check is debounced at 350 ms; let it fire and answer it
+    await new Promise((r) => setTimeout(r, 400))
+    drain?.()
+    drain = null
+  })
+
+  /**
+   * Load through the plain stub, then hand the store a fetch the test controls.
+   * `puts` counts only the PUTs. The debounced live check fires alongside them, so
+   * `settle` answers whatever validate calls turn up while it waits — a save's own
+   * check can never be confused with the watcher's that way.
+   */
+  async function loadedThenDeferred() {
+    const store = await loaded()
+    const { fetch, calls } = deferredFetch()
+    vi.stubGlobal('fetch', fetch)
+    const puts = () => calls.filter((c) => c.key === 'PUT /api/profiles/1')
+    const answered = new Set<(typeof calls)[number]>()
+    const answerPending = () => {
+      for (const c of calls) {
+        if (c.key === 'POST /api/profiles/validate' && !answered.has(c)) {
+          answered.add(c)
+          c.release(validation({ budget: budget() }))
+        }
+      }
+    }
+    drain = answerPending
+    /** Resolve the given promise, answering every check that appears meanwhile. */
+    const settle = async <T,>(p: Promise<T>): Promise<T> => {
+      let done = false
+      const result = p.finally(() => {
+        done = true
+      })
+      while (!done) {
+        answerPending()
+        await new Promise((r) => setTimeout(r, 1))
+      }
+      return result
+    }
+    return { store, calls, puts, settle }
+  }
+
+  it('keeps edits typed while the save was in flight', async () => {
+    const { store, puts, settle } = await loadedThenDeferred()
+    store.doc!.name = 'First'
+    const saving = store.save()
+    await vi.waitFor(() => expect(puts()).toHaveLength(1))
+
+    // typed while the PUT is away
+    store.doc!.name = 'Second'
+
+    puts()[0]!.release(editableProfile({ name: 'First' }))
+    await settle(saving)
+    // the reply must not overwrite what is on screen
+    expect(store.doc?.name).toBe('Second')
+    expect(store.dirty).toBe(true)
+
+    // and the next save carries what is on screen now, not what the reply said
+    const again = store.save()
+    await vi.waitFor(() => expect(puts()).toHaveLength(2))
+    puts()[1]!.release(editableProfile({ name: 'Second' }))
+    await settle(again)
+    expect(store.doc?.name).toBe('Second')
+    expect(store.dirty).toBe(false)
+  })
+
+  it('adopts the server reply when nothing was typed in flight, keeping the mode position', async () => {
+    const { store, puts, settle } = await loadedThenDeferred()
+    store.selectMode(store.doc!.modes[1]!.key)
+    store.doc!.name = 'Renamed'
+    const saving = store.save()
+    await vi.waitFor(() => expect(puts()).toHaveLength(1))
+    puts()[0]!.release(editableProfile({ name: 'Renamed' }))
+    expect(await settle(saving)).toBe(true)
+    expect(store.doc?.name).toBe('Renamed')
+    expect(store.dirty).toBe(false)
+    // the reply is re-keyed; the rail must still highlight the second mode
+    expect(store.selectedModeNumber).toBe(2)
+    expect(store.selectedModeKey).toBe(store.doc!.modes[1]!.key)
+  })
+
+  it('serialises two overlapping saves into one PUT', async () => {
+    // Save then Export (which saves when dirty) is the real path here: two PUTs in
+    // flight at once and the older reply could resurrect the older body.
+    const { store, puts, settle } = await loadedThenDeferred()
+    store.doc!.name = 'Renamed'
+    const a = store.save()
+    const b = store.save()
+    await vi.waitFor(() => expect(puts()).toHaveLength(1))
+
+    puts()[0]!.release(editableProfile({ name: 'Renamed' }))
+
+    expect(await settle(a)).toBe(true)
+    expect(await settle(b)).toBe(true)
+    // the second save found nothing left to send
+    expect(puts()).toHaveLength(1)
+    expect(store.dirty).toBe(false)
   })
 })
 
@@ -483,6 +599,19 @@ describe('live checks', () => {
     calls[0]!.release({ detail: 'boom' }, 500)
     await older
     expect(store.error).toBeNull()
+  })
+
+  it('serialises the document once per edit, not once per reader', async () => {
+    // `dirty` and the check watcher both need the wire JSON; walking the whole
+    // document twice for every keystroke is the difference the shared computed makes.
+    vi.useFakeTimers()
+    const store = await loaded()
+    const spy = vi.spyOn(JSON, 'stringify')
+    store.doc!.name = 'Renamed'
+    expect(store.dirty).toBe(true)
+    await Promise.resolve() // let the watcher run
+    expect(spy).toHaveBeenCalledTimes(1)
+    vi.useRealTimers()
   })
 
   it('a slower earlier load cannot overwrite a newer one', async () => {

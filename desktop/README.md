@@ -44,18 +44,41 @@ python desktop/launcher.py               # the window
 python desktop/launcher.py --headless    # server only; prints the URL
 ```
 
-## Unsigned, on purpose (for now)
+## Signing
 
-The builds are not code-signed or notarised.
+- **macOS**: the release build is signed with the owner's Developer ID and
+  notarised by Apple, so it opens like any other app. `build.sh` signs whenever a
+  "Developer ID Application" identity is in the keychain (`sign.sh`: every Mach-O
+  file, hardened runtime, `entitlements.plist` — the two exceptions CPython needs
+  under the hardened runtime), and release.yml then runs `notarize.sh`. Both
+  scripts work from a checkout too; their headers show how.
 
-- **Windows**: SmartScreen shows "Windows protected your PC" the first time. Click
-  *More info* → *Run anyway*. The app needs the WebView2 runtime, which Windows 11
-  and up-to-date Windows 10 already have; without it the app opens in your default
-  browser instead and tells you so. Runtime download:
+  `sign.sh` resolves the identity to exactly one certificate and passes `codesign`
+  its SHA-1 hash, because a name that matches two (a Developer ID Application and
+  a Developer ID Installer, say) makes `codesign` fail as "ambiguous". Set
+  `CODESIGN_IDENTITY` to a full name, a unique substring, or the 40-character hash
+  from `security find-identity -v -p codesigning` if you have more than one; with
+  no match, or more than one, `sign.sh` lists what it found and stops.
+
+  The workflow reads **five** repository secrets — `MACOS_CERT_P12` (the
+  certificate exported as .p12, base64), `MACOS_CERT_PASSWORD`, and for
+  notarisation an App Store Connect API key: `APPLE_API_KEY_ID`,
+  `APPLE_API_ISSUER_ID`, `APPLE_API_KEY_P8` (the .p8, base64). It is all five or
+  none: with none it builds unsigned, so a fork still gets a build; with some of
+  them it fails the job immediately rather than shipping a half-signed app, since
+  a signed but un-notarised Developer ID app is still blocked by Gatekeeper. The
+  release notes only claim "signed and notarised" when `notarize.sh` actually
+  succeeded, and otherwise carry the right-click → *Open* instructions.
+
+  Changing the bundle identifier after a signed release makes macOS treat it as a
+  different app, so it stays `ai.myaccessibility.quadstickprofilestudio`.
+- **Windows**: unsigned. SmartScreen shows "Windows protected your PC" the first
+  time. Click *More info* → *Run anyway*. The app needs the WebView2 runtime, which
+  Windows 11 and up-to-date Windows 10 already have; without it the app opens in
+  your default browser instead and tells you so. Runtime download:
   <https://developer.microsoft.com/microsoft-edge/webview2/>.
-- **macOS**: Gatekeeper says the app "cannot be opened because the developer cannot
-  be verified". Either right-click → *Open* once, or run
-  `xattr -dr com.apple.quarantine "QuadStick Profile Studio.app"` after unzipping.
+- An unsigned macOS build (no identity in the keychain) hits Gatekeeper: right-click
+  → *Open* once, or `xattr -dr com.apple.quarantine "QuadStick Profile Studio.app"`.
 
 ## Smoke test (do this on every build before a release)
 
@@ -77,4 +100,7 @@ macOS first, then Windows. Delete nothing between steps unless it says so.
    opens in the browser with a dialog explaining that.
 
 The automated part of this (`--headless`, curl `/`, `/api/version`, an export) is
-what `build.sh` checks in CI.
+`scripts/desktop_check.sh`. `release.yml` runs it twice: once on the app as built,
+so a broken build fails before waiting on Apple, and again on the app *unpacked
+from the zip that ships* — after stapling and re-zipping, so what is uploaded is
+what was launched.

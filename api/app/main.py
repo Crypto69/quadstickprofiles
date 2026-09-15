@@ -4,6 +4,7 @@ import os
 from importlib.metadata import PackageNotFoundError, version as _package_version
 
 from fastapi import APIRouter, FastAPI
+from .csrf import install_csrf_guard
 from .routers import catalog, prefs, profiles
 from .settings import settings
 
@@ -19,6 +20,10 @@ app = FastAPI(title="QuadStick Profile Studio API", version=API_VERSION,
               redoc_url=None,
               description="Wraps core/qsprofile: catalog, profiles, import/export, validation, "
                           "console conversion and printable reference cards.")
+
+# There is no login (single-user), so nothing stops a page on the LAN from posting
+# at the API. Refuse cross-origin state changes before anything else sees them.
+install_csrf_guard(app, API_PREFIX)
 
 api = APIRouter(prefix=API_PREFIX)
 api.include_router(catalog.router)

@@ -81,6 +81,54 @@ def test_summary_prints_the_note_as_a_fourth_column():
     assert '<th>PS5</th><th>Note</th>' in h
 
 
+def test_function_words_and_params_are_escaped():
+    """C2: `params` are free text by design (the parser keeps a token it could not read
+    so the editor can show the bad row) and an imported function name need not be a
+    known keyword, so both reach `fn_tag` unfiltered. Neither may land in the card as
+    markup — the card is served from the API, so raw HTML here is stored XSS."""
+    from qsprofile import load, render, render_summary
+    cfg, _ = load(str(FX / "ddfortnite.csv"))
+    hit = 0
+    for mode in cfg.modes:
+        for m in mode.active():
+            if m.output != "left_2":
+                continue
+            hit += 1
+            if hit == 1:                 # an unknown function word, straight from an import
+                m.function, m.params = "<b>bad</b>", []
+            else:                        # a known word with a param the parser could not read
+                m.function, m.params = "repeat", ["<img src=x onerror=alert(1)>"]
+    assert hit >= 2, "fixture no longer has the rows this test rewrites"
+    for h in (render(cfg, {}, []), render_summary(cfg, {})):
+        assert "&lt;img src=x onerror=alert(1)&gt;" in h
+        assert "&lt;b&gt;bad&lt;/b&gt;" in h
+        assert "<img src=x" not in h
+        assert "<b>bad</b>" not in h
+
+
+def test_switching_escapes_a_mode_change_output_with_no_glyph(monkeypatch):
+    """C2: `switching()` falls back to the raw output name when GLYPH has none. Every
+    catalog mode-change output has a glyph today, so the fallback is only reachable if
+    the catalog gains one first — escape it now rather than notice later."""
+    import importlib
+    from qsprofile import load
+    render_mod = importlib.import_module("qsprofile.render")
+    switching = render_mod.switching
+    bad = "<script>x</script>"
+    cfg, _ = load(str(FX / "ddfortnite.csv"))
+    renamed = 0
+    for m in cfg.modes[0].active():
+        if m.output in render_mod.MODE_CHANGE_OUTPUTS:
+            m.output = bad
+            renamed += 1
+    assert renamed, "mode 1 no longer has a mode-change row"
+    monkeypatch.setattr(render_mod, "MODE_CHANGE_OUTPUTS", {bad})
+    monkeypatch.setattr(render_mod, "GLYPH", {})        # no glyph for it, so the raw name is used
+    lines = switching(cfg)
+    assert any("&lt;script&gt;" in line for line in lines), lines
+    assert not any("<script>" in line for line in lines)
+
+
 def test_detailed_sheet_prints_each_note_on_its_own_button():
     """The Note belongs to one row, so it prints on that row's chip.
 

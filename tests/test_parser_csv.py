@@ -294,3 +294,106 @@ def test_override_row_with_an_empty_column_b_is_not_warned_about_b(tmp_path):
     body = b"mouse_speed,,120,\r\nincrement_mode,normal,right_sip,\r\n" + PREFS_TAIL
     cfg, problems = load(str(_write(tmp_path, body)))
     assert not [x for x in validate(cfg, problems) if "column B" in x[3]]
+
+
+# ---------------------------------------------------------------- N9: input gaps
+def test_gap_between_input_cells_is_closed_up_and_reported(tmp_path):
+    """N9: the model stores inputs as a plain ordered list, so a hole between two
+    filled cells cannot be kept — and keeping one would break sequence handling.
+    The order survives, but the row re-exports shifted left, so say so as an info
+    rather than change the file silently."""
+    body = (b"increment_mode,normal,right_sip,\r\n"
+            b"cross,normal,lip,,right_sip,\r\n"
+            + PREFS_TAIL)
+    cfg, problems = load(str(_write(tmp_path, body)))
+    m = cfg.modes[0].mappings[1]
+    assert m.inputs == ["lip", "right_sip"]                  # order kept, gap gone
+    gaps = [p for p in problems if "empty input cell" in p[3]]
+    assert len(gaps) == 1, problems
+    assert gaps[0][0] == "info" and (gaps[0][1], gaps[0][2]) == (1, 5)
+    assert "column E" in gaps[0][3]                          # the last filled input column
+    assert not [p for p in problems if p[0] == "error"], problems
+    out = tmp_path / "out.csv"
+    write_csv(cfg, str(out))
+    assert b"cross,normal,lip,right_sip,\r\n" in out.read_bytes()
+
+
+def test_contiguous_inputs_and_trailing_blanks_report_nothing(tmp_path):
+    """Only a gap *before* the last filled cell matters; the trailing commas every
+    device row carries must never produce a finding."""
+    body = (b"increment_mode,normal,right_sip,\r\n"
+            b"cross,normal,lip,right_sip,,,\r\n"
+            + PREFS_TAIL)
+    cfg, problems = load(str(_write(tmp_path, body)))
+    assert cfg.modes[0].mappings[1].inputs == ["lip", "right_sip"]
+    assert not [p for p in problems if "empty input cell" in p[3]], problems
+
+
+# ---------------------------------------------------------------- N10: encoding
+def test_ansi_saved_csv_is_read_as_windows_1252_with_a_warning(tmp_path):
+    """N10: the add-on writes ASCII, but a file re-saved from Excel or Notepad as
+    "ANSI" is Windows-1252 and used to raise UnicodeDecodeError before anything
+    could be reported. Read it, report where, and let validate() flag the cell —
+    write_csv is strict ASCII so the byte can never reach the device anyway."""
+    body = b"cross,normal,lip\xe9,\r\nincrement_mode,normal,right_sip,\r\n" + PREFS_TAIL
+    cfg, problems = load(str(_write(tmp_path, body)))
+    assert cfg.modes[0].mappings[0].inputs == ["lipé"]
+    enc = [p for p in problems if "Windows-1252" in p[3]]
+    assert len(enc) == 1, problems
+    assert enc[0][0] == "warning" and enc[0][2] == 5           # file line, 0xe9 is on line 5
+    assert "0xe9" in enc[0][3]
+    from qsprofile import validate
+    assert [f for f in validate(cfg, problems) if "lipé" in f[3]]
+
+
+def test_a_utf8_bom_alone_is_not_an_encoding_warning(tmp_path):
+    body = b"increment_mode,normal,right_sip,\r\n" + PREFS_TAIL
+    src = tmp_path / "bom.csv"
+    src.write_bytes(b"\xef\xbb\xbf" + HEAD + body)
+    cfg, problems = load(str(src))
+    assert cfg.name == "Blank rows"                           # the BOM did not corrupt line 1
+    assert not [p for p in problems if "Windows-1252" in p[3]], problems
+    assert not [p for p in problems if p[0] == "error"], problems
+
+
+# ------------------------------------------------------------------- W6: Infrared
+def test_an_infrared_block_is_refused_not_parsed_as_a_mode(tmp_path):
+    """`write_csv` writes `Profile Name` for every mode, and that header is what the
+    firmware dispatches on. Parsing an IR block as a mode would therefore turn it into
+    a profile block on export. Count it, error, and store nothing."""
+    src = _write(tmp_path,
+                 b"cross,normal,lip,\r\n"
+                 b"\r\n"
+                 b"Infrared,,TV power,\r\n"
+                 b"ir_code,,0x20DF10EF,\r\n"
+                 b"\r\n")
+    cfg, problems = load(str(src))
+    assert cfg.infrared_blocks == 1
+    assert len(cfg.modes) == 1                      # the IR block is not one of them
+    ir = [p for p in problems if "Infrared" in p[3]]
+    assert len(ir) == 1 and ir[0][0] == "error", problems
+    assert "ir_code" not in [m.output for m in cfg.modes[0].mappings]
+
+
+def test_a_mode_after_an_infrared_block_keeps_its_numbering(tmp_path):
+    """The IR block must not consume a mode number, or every later mode is misreported."""
+    src = _write(tmp_path,
+                 b"cross,normal,lip,\r\n"
+                 b"\r\n"
+                 b"Infrared,,TV power,\r\n"
+                 b"\r\n"
+                 b"Profile Name,,Second,\r\n"
+                 b",,Normal,\r\n"
+                 b"Output or Function,Function,usb,\r\n"
+                 b"circle,normal,lip,\r\n"
+                 b"\r\n")
+    cfg, problems = load(str(src))
+    assert cfg.infrared_blocks == 1
+    assert [m.number for m in cfg.modes] == [1, 2]
+    assert [m.label for m in cfg.modes] == ["Left joy", "Second"]
+
+
+def test_a_file_with_no_infrared_block_counts_none(tmp_path):
+    cfg, problems = load(str(_write(tmp_path, b"cross,normal,lip,\r\n\r\n")))
+    assert cfg.infrared_blocks == 0
+    assert not [p for p in problems if "Infrared" in p[3]], problems

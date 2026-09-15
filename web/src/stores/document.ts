@@ -6,7 +6,8 @@ import { computed, ref, watch } from 'vue'
 import { api } from '@/api/client'
 import { describe } from '@/api/errors'
 import type {
-  Budget, Channel, Console, Finding, MappingIn, ModeIn, Profile, ProfileCreate, ProfileMeta,
+  Budget, Channel, Console, Finding, FunctionParam, MappingIn, ModeIn, Profile, ProfileCreate,
+  ProfileMeta,
   Severity,
   Validation,
 } from '@/api/types'
@@ -40,7 +41,8 @@ export interface EditMapping {
   output: string
   value: string
   function: string
-  params: number[]
+  /** Usually numbers, but a file may hold a non-numeric token; it round-trips. */
+  params: FunctionParam[]
   inputs: string[]
   comment: string | null
 }
@@ -144,7 +146,16 @@ export const useDocumentStore = defineStore('document', () => {
   const error = ref<string | null>(null)
   const selectedModeKey = ref<string | null>(null)
 
-  const dirty = computed(() => doc.value !== null && JSON.stringify(toBody(doc.value)) !== saved.value)
+  /**
+   * The wire body, and its JSON, computed once. Everything that needs either — the
+   * dirty flag, the live-check watcher, save, the check request — reads these, so a
+   * keystroke walks the document once instead of once per reader. Neither is
+   * exported: outside the store they would be a second source of truth for `doc`.
+   */
+  const body = computed(() => (doc.value ? toBody(doc.value) : null))
+  const serialized = computed(() => (body.value ? JSON.stringify(body.value) : ''))
+
+  const dirty = computed(() => doc.value !== null && serialized.value !== saved.value)
 
   const selectedMode = computed(
     () => doc.value?.modes.find((m) => m.key === selectedModeKey.value) ?? doc.value?.modes[0] ?? null,
@@ -196,13 +207,23 @@ export const useDocumentStore = defineStore('document', () => {
       if (seq !== loadSeq) return
       id.value = p.id
       doc.value = fromProfile(p)
-      saved.value = JSON.stringify(toBody(doc.value))
+      saved.value = serialized.value
       selectedModeKey.value = doc.value.modes[0]?.key ?? null
       await check()
     } catch (e) {
       if (seq !== loadSeq) return
       error.value = describe(e)
+      // Forget the profile the failed load was replacing, id included. The store is
+      // a singleton that outlives the view, and the route watcher skips load() when
+      // the route id already equals this one — so a stale id left here would make
+      // navigating back to the profile that *did* load show the 404 for good.
+      // Cleared here and not at the top of load(), so a failure cannot blank a
+      // document that a newer request is about to keep.
+      id.value = null
       doc.value = null
+      saved.value = ''
+      validation.value = null
+      selectedModeKey.value = null
     } finally {
       if (seq === loadSeq) loading.value = false
     }
@@ -215,7 +236,7 @@ export const useDocumentStore = defineStore('document', () => {
     checking.value = true
     error.value = null // a banner from an earlier failure must not outlive a success
     try {
-      const v = await api.validateDocument(toBody(doc.value))
+      const v = await api.validateDocument(body.value!)
       if (seq !== checkSeq) return
       validation.value = v
     } catch (e) {
@@ -235,26 +256,48 @@ export const useDocumentStore = defineStore('document', () => {
     timer = setTimeout(() => void check(), ms)
   }
 
-  watch(
-    () => (doc.value ? JSON.stringify(toBody(doc.value)) : ''),
-    (now, before) => {
-      if (now && before !== undefined && now !== before) checkSoon()
-    },
-  )
+  watch(serialized, (now, before) => {
+    if (now && before !== undefined && now !== before) checkSoon()
+  })
 
-  async function save() {
+  /**
+   * Saves run one at a time. The inputs stay enabled while a PUT is in flight (the
+   * owner types slowly; locking the editor for the length of a request would be
+   * worse than the race), and Export saves first, so two PUTs could otherwise
+   * overlap and the second reply could resurrect the first body. Chaining them
+   * means the second save sends what is on screen *after* the first landed.
+   */
+  let inflight: Promise<boolean> | null = null
+
+  function save(): Promise<boolean> {
+    const run = (inflight ?? Promise.resolve(true)).then(() => saveNow())
+    inflight = run.finally(() => {
+      if (inflight === run) inflight = null
+    })
+    return inflight
+  }
+
+  async function saveNow() {
     if (!doc.value || id.value === null) return false
+    // What this PUT carries, frozen now: the document may change while it is away.
+    const sent = serialized.value
+    if (sent === saved.value) return true // nothing to send; a chained save whose work was already done
     saving.value = true
     error.value = null
     try {
-      const body = toBody(doc.value)
       // The reply is re-keyed, so the selected key would go stale and the rail
       // would highlight nothing. Position is the mode number; carry that across.
       const position = doc.value.modes.findIndex((m) => m.key === selectedMode.value?.key)
-      const p = await api.replaceProfile(id.value, body)
-      doc.value = fromProfile(p)
-      saved.value = JSON.stringify(toBody(doc.value))
-      selectedModeKey.value = (doc.value.modes[position] ?? doc.value.modes[0])?.key ?? null
+      const p = await api.replaceProfile(id.value, JSON.parse(sent) as ProfileCreate)
+      const reply = fromProfile(p)
+      saved.value = JSON.stringify(toBody(reply))
+      // Adopting the reply is only safe if nothing was typed while it was away:
+      // otherwise it would silently undo those keystrokes. If it was touched, the
+      // local document stands, `dirty` stays true and Save comes back on.
+      if (serialized.value === sent) {
+        doc.value = reply
+        selectedModeKey.value = (reply.modes[position] ?? reply.modes[0])?.key ?? null
+      }
       await check()
       return true
     } catch (e) {

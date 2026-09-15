@@ -72,7 +72,7 @@ class Profile(Base):
                                           server_default=str(C.DEFAULT_FIRMWARE))
     # a starter profile to copy from, rather than one of the owner's own
     is_template: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False,
-                                              server_default=text("false"))
+                                              server_default=text("false"), index=True)
     template_note: Mapped[str | None] = mapped_column(Text)     # what this starter is for
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(),
@@ -96,7 +96,8 @@ class Mode(Base):
         CheckConstraint("position between 1 and 16", name="ck_modes_position"),
     )
     id: Mapped[int] = mapped_column(PK, primary_key=True)
-    profile_id: Mapped[int] = mapped_column(ForeignKey("profiles.id", ondelete="CASCADE"), nullable=False)
+    profile_id: Mapped[int] = mapped_column(ForeignKey("profiles.id", ondelete="CASCADE"), nullable=False,
+                                            index=True)
     position: Mapped[int] = mapped_column(SmallInteger, nullable=False)     # = mode number
     name: Mapped[str] = mapped_column(Text, nullable=False)                 # sheet tab name
     label: Mapped[str] = mapped_column(Text, nullable=False)                # C1
@@ -126,9 +127,10 @@ class Mapping(Base):
                         name="ck_mappings_shape"),
     )
     id: Mapped[int] = mapped_column(PK, primary_key=True)
-    mode_id: Mapped[int] = mapped_column(ForeignKey("modes.id", ondelete="CASCADE"), nullable=False)
+    mode_id: Mapped[int] = mapped_column(ForeignKey("modes.id", ondelete="CASCADE"), nullable=False, index=True)
     row_order: Mapped[int] = mapped_column(Integer, nullable=False)
-    kind: Mapped[str] = mapped_column(Text, nullable=False, default="mapping", server_default="mapping")
+    kind: Mapped[str] = mapped_column(Text, nullable=False, default="mapping", server_default="mapping",
+                                      index=True)
     output: Mapped[str | None] = mapped_column(ForeignKey("output_catalog.name"))
     pref_key: Mapped[str | None] = mapped_column(Text)                      # kind == "preference"
     value: Mapped[str] = mapped_column(Text, nullable=False, default="", server_default="")
@@ -155,7 +157,7 @@ class Preference(Base):
     __table_args__ = (CheckConstraint("scope in ('global','profile','mode')", name="ck_preferences_scope"),)
     id: Mapped[int] = mapped_column(PK, primary_key=True)
     scope: Mapped[str] = mapped_column(Text, nullable=False)
-    profile_id: Mapped[int | None] = mapped_column(ForeignKey("profiles.id", ondelete="CASCADE"))
+    profile_id: Mapped[int | None] = mapped_column(ForeignKey("profiles.id", ondelete="CASCADE"), index=True)
     mode_id: Mapped[int | None] = mapped_column(ForeignKey("modes.id", ondelete="CASCADE"))
     key: Mapped[str] = mapped_column(Text, nullable=False)
     value: Mapped[str] = mapped_column(Text, nullable=False)
@@ -164,8 +166,9 @@ class Preference(Base):
 class GameAction(Base):
     __tablename__ = "game_actions"
     id: Mapped[int] = mapped_column(PK, primary_key=True)
-    profile_id: Mapped[int | None] = mapped_column(ForeignKey("profiles.id", ondelete="CASCADE"))  # null = shared template
-    game: Mapped[str] = mapped_column(Text, nullable=False)
+    profile_id: Mapped[int | None] = mapped_column(ForeignKey("profiles.id", ondelete="CASCADE"),  # null = shared template
+                                                   index=True)
+    game: Mapped[str] = mapped_column(Text, nullable=False, index=True)
     mode_name: Mapped[str | None] = mapped_column(Text)                     # null = every mode
     output: Mapped[str] = mapped_column(Text, nullable=False)
     action: Mapped[str] = mapped_column(Text, nullable=False)

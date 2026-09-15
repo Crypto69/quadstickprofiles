@@ -30,6 +30,54 @@ def test_legacy_input_names_are_in_the_catalog_so_the_fk_holds(client):
     assert client.get("/catalog").json()["legacy_inputs"] == C.LEGACY_INPUTS
 
 
+def _every_accepted_input_name():
+    """The full vocabulary classify_input() accepts, built independently of
+    catalog_seed so the seed cannot define away its own gap (C1)."""
+    cand = {"lip", "lip_soft", "center", "any_direction"}
+    cand |= {f"mp_{t}_{a}{s}" for t in C.TUBES for a in ("sip", "puff") for s in ("", "_soft")}
+    cand |= {f"right_{a}{s}" for a in ("sip", "puff") for s in ("", "_soft")}
+    cand |= {f"{d}{r}" for d in C.JOY_DIRS + C.JOY_ZONES for r in ("", "_inner")}
+    cand |= {f"digital_in_{n}" for n in range(1, 9)}
+    cand |= {f"usb_{u}_{d}{r}" for u in (1, 2)
+             for d in C.JOY_DIRS + C.JOY_ZONES + [f"button_{n}" for n in range(1, 17)]
+             for r in ("", "_inner")}
+    cand |= set(C.SPECIAL_INPUTS) | set(C.LEGACY_INPUTS)
+    return {n for n in cand if C.classify_input(n)}
+
+
+def test_every_input_the_validator_accepts_is_seeded_so_the_fk_holds(client):
+    """The API pre-check is classify_input(); if the seed knows fewer names than it
+    does, saving one of the others fails the mapping_inputs FK with a 500."""
+    inputs = {i["name"] for i in client.get("/catalog").json()["inputs"]}
+    missing = sorted(_every_accepted_input_name() - inputs)
+    assert not missing, f"accepted by classify_input() but absent from input_catalog: {missing}"
+    # and the names C1 found missing are there under the kind classify_input() gives them
+    by_name = {i["name"]: i for i in client.get("/catalog").json()["inputs"]}
+    for n in ("constant", "none", "any_direction", "mp_right_mode_sip", "mp_right_mode_sip_soft",
+              "mp_right_mode_puff", "mp_right_mode_puff_soft", "usb_1_button_16",
+              "usb_1_button_16_inner", "usb_2_button_16", "usb_2_button_16_inner"):
+        assert n in by_name, n
+        assert by_name[n]["kind"] == C.classify_input(n)["kind"], n
+
+
+def test_the_inputs_c1_found_missing_can_actually_be_saved(client):
+    body = {"name": "C1", "csv_filename": "c1.csv", "modes": [{"name": "M", "mappings": [
+        {"output": "x", "inputs": ["constant"]},
+        {"output": "circle", "inputs": ["none"]},
+        {"output": "square", "inputs": ["mp_right_mode_sip"]},
+        {"output": "triangle", "inputs": ["mp_right_mode_puff_soft"]},
+        {"output": "left_1", "inputs": ["usb_1_button_16"]},
+        {"output": "right_1", "inputs": ["usb_2_button_16_inner"]},
+        {"output": "left_2", "inputs": ["any_direction"]},
+        {"output": "increment_mode", "inputs": ["right_sip"]},
+    ]}]}
+    r = client.post("/profiles", json=body)
+    assert r.status_code == 201, r.text
+    v = client.get(f"/profiles/{r.json()['id']}/validate").json()
+    assert v["errors"] == 0, v["findings"]
+    assert client.get(f"/profiles/{r.json()['id']}/export.csv").status_code == 200
+
+
 def test_a_profile_using_a_legacy_input_saves_and_is_warned_about(client):
     body = {"name": "Legacy", "csv_filename": "legacy.csv",
             "modes": [{"name": "M", "mappings": [
@@ -263,7 +311,11 @@ def test_duplicate_copies_everything_and_takes_a_new_filename(client):
     copy = r.json()
     assert copy["id"] != src["id"]
     assert copy["csv_filename"] == "synthpref_copy.csv"            # the device picks files by filename
-    assert copy["name"].endswith("(copy)")
+    # W: the default name is the filename's stem, so name and file agree on the stick.
+    # It used to be "<name> (copy)", which paired a name with a file that looked nothing
+    # like it and made a stick full of copies unreadable.
+    assert copy["name"] == "synthpref_copy"
+    assert C.csv_filename_for_name(copy["name"]) == copy["csv_filename"]
     assert copy["firmware"] == src["firmware"] and copy["preferences"] == src["preferences"]
     assert copy["input_names"] == {"lip": "Chin switch"}
     assert len(copy["modes"]) == len(src["modes"])
@@ -315,6 +367,17 @@ def test_mode_channel_both_and_none_are_accepted_on_write(client):
         assert r.json()["modes"][0]["channel"] == ch
         assert f"Output or Function,Function,{ch}," in client.get(
             f"/profiles/{r.json()['id']}/export.csv").content.decode()
+    # an off-catalog channel is a finding, not a bad request (W4): an import stores C3
+    # as the file held it, so what GET returns must PUT back or the profile freezes.
     r = client.post("/profiles", json={"name": "Ch", "csv_filename": "ch.csv",
                                        "modes": [{"name": "M", "channel": "wifi"}]})
-    assert r.status_code == 422
+    assert r.status_code == 201, r.text
+    pid = r.json()["id"]
+    assert r.json()["modes"][0]["channel"] == "wifi"
+    findings = client.get(f"/profiles/{pid}/validate").json()["findings"]
+    assert any(f["severity"] == "error" and f["mode"] == 1 and f["row"] == 3 for f in findings), findings
+    assert client.get(f"/profiles/{pid}/export.csv").status_code == 409
+    # the text rule still applies: a comma in C3 would shift the cells of the file
+    r = client.post("/profiles", json={"name": "Ch", "csv_filename": "ch.csv",
+                                       "modes": [{"name": "M", "channel": "us,b"}]})
+    assert r.status_code == 422, r.text

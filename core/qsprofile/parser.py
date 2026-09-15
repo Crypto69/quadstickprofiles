@@ -7,6 +7,7 @@ or a device .csv into the model. Layout, from the manual and ddfortnite.xlsx:
   The first blank column-A cell ends the sheet.
 """
 import csv
+import io
 from openpyxl import load_workbook
 from .model import Config, Mode, Mapping
 from .catalog import parse_function, canonical_output, output_label, XBOX_TO_PS, PREFERENCES
@@ -15,6 +16,13 @@ SHEET_TYPES = {"Profile Name", "Preferences", "Infrared"}
 HELPER_SHEETS = {"inputs", "outputs", "voice"}   # dropdown-list tabs in the official template;
                                                  # the add-on skips them, so does this parser
 KEYWORD_COLS = 10          # A..J are read by the device; K onward are comments
+
+# W6: the firmware dispatches on the block header, and `write_csv` writes `Profile Name`
+# for every mode. So parsing an Infrared block as a mode would silently rewrite it into a
+# profile block. Refuse instead: the IR layout is undocumented and no fixture covers it,
+# and this project adds a fixture before it adds format behaviour.
+_INFRARED_MESSAGE = ("{where} is an Infrared block; this tool does not support IR blocks "
+                     "yet, so it cannot store or export this file without damaging it")
 
 
 def sheet_type(a1):
@@ -123,7 +131,17 @@ def parse_mode_rows(rows, number, name, problems, console="playstation", source=
         # an empty B cell is kept empty: the device treats it as normal, and the
         # bytes must round-trip. validate() reports it as an info.
         fname, params = parse_function(cell)[:2] if cell else ("", [])
-        inputs = [get(i, c) for c in range(2, 10) if get(i, c)]
+        # An empty cell between two filled ones is closed up: the model stores a plain
+        # list, and keeping the hole would break sequence handling and re-export. Order
+        # is kept, but the exported row is not the row that was read, so say so.
+        cells = [get(i, c) for c in range(2, 10)]
+        filled = [c for c, v in enumerate(cells) if v]
+        if filled and any(not cells[c] for c in range(filled[-1])):
+            problems.append(("info", number, i + 1,
+                             f"Row {i+1} has an empty input cell before column "
+                             f"{'CDEFGHIJ'[filled[-1]]}; the inputs are closed up on import "
+                             "(order kept), so the exported row differs from the file"))
+        inputs = [v for v in cells if v]
         m = Mapping(row=i + 1, output=output, function=fname, params=params, inputs=inputs, comment=comment)
         mode.mappings.append(m)          # a bad function cell is kept as-is; validate() reports it
     return mode
@@ -158,6 +176,11 @@ def parse_xlsx(path):
                     if r and r[0]:
                         cfg.preferences[r[0]] = r[1] if len(r) > 1 else ""
                 continue
+            if kind == "Infrared":
+                cfg.infrared_blocks += 1
+                problems.append(("error", None, 1, _INFRARED_MESSAGE.format(
+                    where=f"Sheet '{ws.title}'")))
+                continue
             mode_no += 1
             rows = hygiene(raw, mode_no, problems)
             if mode_no == 1:
@@ -167,6 +190,25 @@ def parse_xlsx(path):
         return cfg, problems
     finally:
         wb.close()                       # read_only keeps the zip open until told
+
+
+def _read_csv_text(path, problems):
+    """Decode a device CSV. The add-on writes ASCII, so UTF-8 (with or without a BOM)
+    is what we expect; a file re-saved from Excel or Notepad as "ANSI" is Windows-1252
+    and used to raise UnicodeDecodeError before anything could be reported. Read it as
+    cp1252 instead and report where, so the owner can fix the cell here — `write_csv`
+    is strict ASCII, so the byte could never reach the device anyway."""
+    with open(path, "rb") as f:
+        data = f.read()
+    try:
+        return data.decode("utf-8-sig")
+    except UnicodeDecodeError as e:
+        line = data.count(b"\n", 0, e.start) + 1
+        problems.append(("warning", None, line,
+                         f"Line {line} is not UTF-8 (byte 0x{data[e.start]:02x}); read as "
+                         "Windows-1252. The QuadStick reads ASCII only, so fix that cell "
+                         "before export"))
+        return data.removeprefix(b"\xef\xbb\xbf").decode("cp1252", errors="replace")
 
 
 def parse_csv(path):
@@ -180,9 +222,10 @@ def parse_csv(path):
       every data line ends with a trailing comma; CRLF line endings; comments
       and the Reference Card sheet are not exported.
     """
-    with open(path, newline="", encoding="utf-8-sig") as f:
-        allrows = [[_raw(c) for c in r] for r in csv.reader(f)]
-    cfg, problems = Config(name=path.rsplit("/", 1)[-1], filename=""), []
+    problems = []
+    text = _read_csv_text(path, problems)
+    allrows = [[_raw(c) for c in r] for r in csv.reader(io.StringIO(text, newline=""))]
+    cfg = Config(name=path.rsplit("/", 1)[-1], filename="")
     first_line = 1                       # file line number of allrows[0], for messages
     if allrows and allrows[0] and allrows[0][0].strip() == "QuadStick Configuration":
         hdr = allrows[0]
@@ -205,7 +248,7 @@ def parse_csv(path):
         kind = sheet_type(r[0].strip())
         if kind is not None:
             cur = [r]; blocks.append(cur); ended = None
-            if kind != "Preferences":
+            if kind == "Profile Name":
                 modes_seen += 1
             if r[0].strip() != kind:
                 problems.append(_noncanonical(f"Line {lineno}", r[0].strip(), kind))
@@ -217,11 +260,17 @@ def parse_csv(path):
                              "the QuadStick ignores it"))
     n = 0
     for raw in blocks:
-        if sheet_type(raw[0][0].strip()) == "Preferences":
+        kind = sheet_type(raw[0][0].strip())
+        if kind == "Preferences":
             for r in raw[2:]:
                 r = [_cell(c) for c in r]
                 if r and r[0] and r[0] != "Preference":
                     cfg.preferences[r[0]] = r[1] if len(r) > 1 else ""
+            continue
+        if kind == "Infrared":
+            cfg.infrared_blocks += 1
+            problems.append(("error", None, None, _INFRARED_MESSAGE.format(
+                where=f"The block starting '{raw[0][0].strip()}'")))
             continue
         n += 1
         b = hygiene(raw, n, problems)
