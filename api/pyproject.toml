@@ -1,0 +1,30 @@
+[project]
+name = "qsapi"
+version = "0.2.0"
+description = "QuadStick Profile Studio API: FastAPI + SQLAlchemy 2 + Alembic over core/qsprofile"
+requires-python = ">=3.12"
+dependencies = [
+    "qsprofile",
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",
+    "sqlalchemy>=2.0",
+    "alembic>=1.13",
+    "pydantic>=2.7",
+    "pydantic-settings>=2.3",
+    "python-multipart>=0.0.9",
+]
+[project.optional-dependencies]
+# Postgres is what the NAS runs; the desktop build uses SQLite (in the standard
+# library) and leaves the compiled driver out.
+postgres = ["psycopg[binary]>=3.2"]
+dev = ["pytest>=8", "httpx>=0.27"]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["app*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

@@ -1,0 +1,169 @@
+# A `v*` tag (e.g. v1.7) produces a GitHub Release with:
+#   - desktop zips for Windows (x64) and macOS (arm64), built by desktop/build.*
+#     and checked headless with scripts/desktop_check.sh
+#   - multi-arch api and web images on GHCR, tagged <version> and latest
+#   - docker-compose.release.yml + env.example (a copy of .env.example) for Docker anywhere
+# The version is scripts/version.sh's: the tag without the v. The NAS is not
+# involved; deploy.sh keeps building from source.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  version:
+    name: version stamp
+    runs-on: ubuntu-latest
+    outputs:
+      app_version: ${{ steps.v.outputs.APP_VERSION }}
+      git_sha: ${{ steps.v.outputs.GIT_SHA }}
+      build_time: ${{ steps.v.outputs.BUILD_TIME }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: v
+        run: sh scripts/version.sh | tee -a "$GITHUB_OUTPUT"
+
+  images:
+    name: ${{ matrix.svc }} image (amd64 + arm64)
+    needs: version
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        svc: [api, web]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: owner
+        run: echo "lc=$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_OUTPUT"
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ steps.owner.outputs.lc }}/quadstick-profile-studio-${{ matrix.svc }}
+          tags: |
+            type=raw,value=${{ needs.version.outputs.app_version }}
+            type=raw,value=latest
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ${{ matrix.svc }}/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            GIT_SHA=${{ needs.version.outputs.git_sha }}
+            BUILD_TIME=${{ needs.version.outputs.build_time }}
+            APP_VERSION=${{ needs.version.outputs.app_version }}
+          cache-from: type=gha,scope=${{ matrix.svc }}
+          cache-to: type=gha,scope=${{ matrix.svc }},mode=max
+
+  desktop:
+    name: desktop ${{ matrix.label }}
+    needs: version
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            label: windows-x64
+            build: pwsh -File desktop/build.ps1
+            binary: desktop/dist/QuadStick Profile Studio/QuadStick Profile Studio.exe
+          - os: macos-latest
+            label: macos-arm64
+            build: sh desktop/build.sh
+            binary: desktop/dist/QuadStick Profile Studio.app/Contents/MacOS/QuadStick Profile Studio
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            core/pyproject.toml
+            api/pyproject.toml
+            desktop/requirements.txt
+      - run: pip install -e core -e api -r desktop/requirements.txt
+        shell: bash
+      - name: Build
+        run: ${{ matrix.build }}
+        shell: bash
+      - name: Headless check of the built app
+        run: sh scripts/desktop_check.sh "${{ matrix.binary }}"
+        shell: bash
+      - uses: actions/upload-artifact@v4
+        with:
+          name: desktop-${{ matrix.label }}
+          path: desktop/dist/*.zip
+          if-no-files-found: error
+
+  release:
+    name: GitHub Release
+    needs: [version, images, desktop]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: desktop-*
+          path: artifacts
+          merge-multiple: true
+      - name: Release notes header and a dot-less env example
+        run: |
+          # GitHub refuses asset names that start with a dot (it would rename it
+          # to default.env.example), so the example travels as env.example.
+          cp .env.example env.example
+          v='${{ needs.version.outputs.app_version }}'
+          owner="$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')"
+          cat > notes.md <<EOF_NOTES
+          ## Run it
+
+          Download the zip for your operating system below, unzip it, and open
+          \`QuadStick Profile Studio\`. The first launch loads a few example profiles.
+
+          **Windows:** \`QuadStickProfileStudio-$v-windows-x64.zip\`. The build is
+          unsigned, so SmartScreen shows "Windows protected your PC" once: click
+          *More info* → *Run anyway*.
+
+          **macOS (Apple Silicon):** \`QuadStickProfileStudio-$v-macos-arm64.zip\`. The
+          build is unsigned, so the first time right-click the app → *Open*.
+
+          Where your data and exports live: \`desktop/README.md\`.
+
+          **Docker (any machine with Docker):** put \`docker-compose.release.yml\` and
+          \`env.example\` from below in a folder, run \`cp env.example .env\`, set
+          \`QS_DB_PASSWORD\` in \`.env\`, then
+          \`APP_VERSION=$v docker compose -f docker-compose.release.yml up -d\` and open
+          <http://localhost:8324>. Images:
+          \`ghcr.io/$owner/quadstick-profile-studio-api:$v\` and
+          \`…-web:$v\` (linux/amd64 and linux/arm64).
+
+          **NAS:** clone the repository onto the NAS and run \`./deploy.sh\`. Step by
+          step, including ports, backups and updates: \`docs/DEPLOY-NAS.md\`.
+
+          EOF_NOTES
+      - uses: softprops/action-gh-release@v2
+        with:
+          name: QuadStick Profile Studio ${{ needs.version.outputs.app_version }}
+          body_path: notes.md
+          generate_release_notes: true
+          files: |
+            artifacts/*.zip
+            docker-compose.release.yml
+            env.example

@@ -1,0 +1,80 @@
+/* Design tokens. The sip / puff / mode colours are the same values the printed
+   card uses (core/qsprofile/render.py CSS), so a mode looks the same on screen,
+   on paper, and in the photos the owner shares. */
+:root {
+  /* ink and paper */
+  --ink: #1d1d1b;
+  --ink-soft: #55554f;
+  /* Darkened from #7a7a72, which was 4.33:1 on white — under the 4.5:1 the
+     smallest text here needs. An axe run caught it. */
+  --ink-faint: #6b6b63;
+  --paper: #ffffff;
+  --paper-sunk: #f4f4f1;
+  --paper-edge: #e9e9e6;
+  --line: #cfcfc9;
+  --line-strong: #a8a8a0;
+
+  /* the two things the whole device is built on */
+  --sip: #0b6e7a;
+  --sip-soft: #e6f2f4;
+  /* Darkened from #c2520a (4.66:1 on white, 3.98:1 on its own tint) so puff text
+     clears 4.5:1 everywhere it is used. render.py carries the same value, because
+     the card and the screen have to look like the same thing. */
+  --puff: #ad4908;
+  --puff-soft: #fbeadf;
+
+  /* modes, and the five LEDs */
+  --mode: #1f4fbf;
+  --mode-soft: #e8edfb;
+
+  /* Callout markers on the device photos. The QuadStick is black, so the dots
+     and leader lines need a colour that survives against it — acid green does,
+     where --mode disappeared. Text still sits on a white chip, so the dark
+     --ink stays the readable choice for the label itself. */
+  --callout: #6fe600;
+  --callout-edge: #3c7d00;
+
+  /* severities. Error red is darkened from the card's #c0261d for contrast on white. */
+  --error: #b3221a;
+  --error-soft: #fbeceb;
+  --warning: #ad4908;
+  --warning-soft: #fbeadf;
+  --info: #55554f;
+  --info-soft: #f0f0ec;
+  --ok: #1c6b3f;
+  --ok-soft: #e7f3ec;
+
+  /* type. Atkinson Hyperlegible is bundled, not fetched: the app is offline. */
+  --font: 'Atkinson Hyperlegible', 'Helvetica Neue', Arial, sans-serif;
+  --font-mono: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+  --text-xs: 0.8125rem; /* 13px — the smallest text allowed anywhere */
+  --text-sm: 0.9375rem;
+  --text-base: 1.0625rem; /* body: bigger than a typical app, read from a sofa */
+  --text-lg: 1.25rem;
+  --text-xl: 1.625rem;
+  --text-2xl: 2.125rem;
+
+  /* spacing */
+  --sp-1: 0.25rem;
+  --sp-2: 0.5rem;
+  --sp-3: 0.75rem;
+  --sp-4: 1rem;
+  --sp-5: 1.5rem;
+  --sp-6: 2rem;
+  --sp-7: 3rem;
+
+  --radius: 8px;
+  --radius-sm: 5px;
+  --radius-lg: 14px;
+  --shadow: 0 1px 2px rgb(29 29 27 / 8%), 0 4px 12px rgb(29 29 27 / 6%);
+
+  /* Every interactive thing is at least this big. The owner drives a pointer with
+     his mouth: small targets are the difference between usable and not. */
+  --target: 44px;
+  --focus: 3px solid var(--mode);
+  --focus-offset: 2px;
+}
+
+/* The card and the app are both designed for paper-like light backgrounds.
+   A dark mode would need its own sip/puff pair to stay legible, so until that
+   is designed we keep one committed palette rather than a half-working invert. */

@@ -1,0 +1,22 @@
+# Both Dockerfiles use the repo root as build context. Keep the context small:
+# core/, api/, web/, fixtures/ and actions/ are what they COPY.
+.git
+.venv
+**/__pycache__
+**/*.pyc
+**/.pytest_cache
+**/*.egg-info
+web/node_modules
+web/dist
+data
+exports
+desktop/dist
+desktop/build
+desktop/version.txt
+samples
+images
+docs
+*.md
+.env
+.github
+.DS_Store

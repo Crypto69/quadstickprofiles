@@ -1,0 +1,32 @@
+# QuadStick infrared remote output keywords (ir_*) for firmware 2373, one per line.
+# Data from QuadStick Config Manager (Bbrizly, MIT License, Copyright (c) 2025 Brizly),
+# src/QuadStick.Format/Data/validation.json (outputs_ps3; the Xbox list is identical),
+# fetched 2026-09-13. The firmware matches these names exactly and silently skips
+# anything else, so a near miss such as kb_leftshift must be an error, not a family match.
+ir_tv_channel_up
+ir_tv_channel_down
+ir_tv_volume_up
+ir_tv_volume_down
+ir_tv_on_off
+ir_tv_select_input
+ir_play
+ir_stop
+ir_fast_forward
+ir_rewind
+ir_skip_forward
+ir_skip_back
+ir_record
+ir_pause
+ir_mute
+ir_guide
+ir_menu
+ir_cancel
+ir_select
+ir_up
+ir_down
+ir_left
+ir_right
+ir_aux1
+ir_aux2
+ir_aux3
+ir_aux4

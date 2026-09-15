@@ -1,0 +1,58 @@
+# QuadStick Profile Studio from prebuilt images (GitHub Container Registry), for
+# anyone with Docker who does not want to build from source:
+#
+#   cp .env.example .env            # set QS_DB_PASSWORD before the first start
+#   docker compose -f docker-compose.release.yml up -d
+#   open http://localhost:8324
+#
+# Same services, volumes, ports and environment as docker-compose.yml; only the
+# `build:` blocks are replaced by `image:`. The NAS keeps building from source with
+# deploy.sh and docker-compose.yml. APP_VERSION picks a release (e.g. 1.7); unset
+# it pulls `latest`. Images are published for linux/amd64 and linux/arm64.
+services:
+  db:
+    # Debian image on purpose (uid 999, glibc collation). Never switch an existing
+    # data directory between this and -alpine; see docker-compose.yml.
+    image: postgres:16
+    environment:
+      POSTGRES_DB: quadstick
+      POSTGRES_USER: quadstick
+      POSTGRES_PASSWORD: ${QS_DB_PASSWORD:-quadstick}
+    volumes:
+      - ${QS_PGDATA_HOST:-./data/pg}:/var/lib/postgresql/data
+      - ${QS_BACKUP_HOST:-./data/backups}:/backups
+    healthcheck:
+      test: ["CMD-SHELL", "psql -U quadstick -d quadstick -c 'select 1' >/dev/null 2>&1"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  api:
+    image: ghcr.io/crypto69/quadstick-profile-studio-api:${APP_VERSION:-latest}
+    environment:
+      QS_DATABASE_URL: postgresql+psycopg://quadstick:${QS_DB_PASSWORD:-quadstick}@db:5432/quadstick
+      QS_SEED_ON_START: "1"
+    volumes:
+      - ${QS_EXPORTS_HOST:-./exports}:/app/exports
+    ports:
+      - "${QS_API_PORT:-8325}:8000"
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3).status==200 else 1)\""]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 40s
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
+  web:
+    image: ghcr.io/crypto69/quadstick-profile-studio-web:${APP_VERSION:-latest}
+    ports:
+      - "${QS_WEB_PORT:-8324}:80"
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped

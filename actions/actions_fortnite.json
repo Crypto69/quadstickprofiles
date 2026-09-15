@@ -1,0 +1,53 @@
+{
+  "game": "Fortnite",
+  "note": "PS5 Builder Pro defaults. Edit to match your in-game settings.",
+  "outputs": {
+    "x": "Jump",
+    "circle": "Crouch / slide",
+    "square": "Reload (hold: interact)",
+    "triangle": "Switch to build mode",
+    "left_1": "Previous weapon",
+    "right_1": "Next weapon",
+    "left_2": "Aim down sights",
+    "right_2": "Fire",
+    "left_3": "Sprint",
+    "right_3": "Harvesting tool",
+    "select": "Share / Create",
+    "start": "Game menu",
+    "ps3": "PS home",
+    "touch": "Map",
+    "dpad_N": "Place marker",
+    "dpad_S": "Emote wheel",
+    "dpad_W": "Push to talk",
+    "dpad_E": "Inventory",
+    "dpad_NE": "",
+    "dpad_SE": "",
+    "dpad_SW": "",
+    "dpad_NW": "",
+    "left_joy_up": "Move",
+    "left_joy_down": "Move",
+    "left_joy_left": "Move",
+    "left_joy_right": "Move",
+    "right_joy_up": "Look",
+    "right_joy_down": "Look",
+    "right_joy_left": "Look",
+    "right_joy_right": "Look",
+    "increment_mode": "Next mode",
+    "decrement_mode": "Previous mode"
+  },
+  "modes": {
+    "Sprint": {
+      "left_3": "Sprint (auto while moving)",
+      "x": "Jump"
+    },
+    "Crucible": {
+      "right_1": "Fire",
+      "right_2": "Next weapon"
+    }
+  },
+  "inputs": {
+    "lip": "Chin switch",
+    "digital_in_1": "Switch 1",
+    "digital_in_2": "Switch 2"
+  }
+}

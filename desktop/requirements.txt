@@ -1,0 +1,7 @@
+# The desktop build's extra packages: the window, the packer and the per-OS folder
+# helper. Install from the repo root together with the app itself:
+#   pip install -e core -e api -r desktop/requirements.txt
+# Postgres is deliberately not here; the desktop build runs on SQLite.
+pywebview>=6.2,<7
+pyinstaller>=6.22,<7
+platformdirs>=4.3,<5

@@ -1,0 +1,30 @@
+__pycache__/
+*.egg-info/
+build/
+.pytest_cache/
+.venv/
+node_modules/
+dist/
+*.tsbuildinfo
+exports/
+data/
+*.pdf
+!samples/*.pdf
+.DS_Store
+.env
+*.log
+HANDOVER-*.md
+CLAUDE.md
+
+# working notes kept locally, not published
+Work in Progress.md
+Packaging plan.md
+docs/accessibility.md
+docs/app-spec.md
+docs/fixtures.md
+docs/prior-art-qcm.md
+docs/research-report.md
+docs/validation-rules.md
+
+# desktop build output
+desktop/version.txt

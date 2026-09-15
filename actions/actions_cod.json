@@ -1,0 +1,14 @@
+{
+  "game": "Call of Duty",
+  "note": "Default controller layout. Edit to match the in-game button layout you use.",
+  "outputs": {
+    "x": "Jump / mantle", "circle": "Crouch (hold: prone)", "square": "Reload / use",
+    "triangle": "Switch weapon", "left_1": "Tactical equipment", "right_1": "Lethal equipment",
+    "left_2": "Aim down sights", "right_2": "Fire", "left_3": "Sprint", "right_3": "Melee",
+    "select": "Scoreboard / map", "start": "Pause menu", "ps3": "Home",
+    "left_joy_up": "Move", "left_joy_down": "Move", "left_joy_left": "Move", "left_joy_right": "Move",
+    "right_joy_up": "Look", "right_joy_down": "Look", "right_joy_left": "Look", "right_joy_right": "Look",
+    "increment_mode": "Next mode", "decrement_mode": "Previous mode"
+  },
+  "modes": {}
+}

@@ -1,0 +1,80 @@
+# QuadStick Profile Studio — web (nginx serving the SPA, proxying /api), api, db.
+# Service and volume names use underscores (TOS docker-compose quirk).
+services:
+  db:
+    # The Debian image, not -alpine: its postgres user is uid 999, which is what
+    # deploy.sh chowns ./data/pg to. The Alpine variant uses uid 70, and the
+    # mismatch makes Postgres fail to read its own files with
+    # 'could not open file "global/pg_filenode.map": Permission denied' — while
+    # still starting and passing its health check.
+    #
+    # Never switch between the two images on an existing data directory: Alpine
+    # (musl) and Debian (glibc) sort text differently, so every btree index on a
+    # text column built by one is corrupt under the other -- unique keys stop
+    # working and the seed dies with 'duplicate key value'. Either recreate
+    # data/pg, or run REINDEX DATABASE + ALTER DATABASE ... REFRESH COLLATION
+    # VERSION on it (see HANDOVER-nas-deploy.md).
+    image: postgres:16
+    environment:
+      POSTGRES_DB: quadstick
+      POSTGRES_USER: quadstick
+      POSTGRES_PASSWORD: ${QS_DB_PASSWORD:-quadstick}
+    volumes:
+      # Bind-mounted inside the checkout, so the database sits on whichever
+      # volume the repo was cloned onto, and is created by deploy.sh with the
+      # right ownership. Override only to move it.
+      - ${QS_PGDATA_HOST:-./data/pg}:/var/lib/postgresql/data
+      # backups written by docs/DEPLOY-NAS.md's cron line
+      - ${QS_BACKUP_HOST:-./data/backups}:/backups
+    healthcheck:
+      # A real query, not just pg_isready: that only asks whether the socket is
+      # accepting connections, so a database that cannot read its own files still
+      # reported healthy while every query failed with Permission denied.
+      test: ["CMD-SHELL", "psql -U quadstick -d quadstick -c 'select 1' >/dev/null 2>&1"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  api:
+    build:
+      context: .
+      dockerfile: api/Dockerfile
+      args:                         # deploy.sh exports these; unset locally is fine
+        GIT_SHA: ${GIT_SHA:-unknown}
+        BUILD_TIME: ${BUILD_TIME:-unknown}
+        APP_VERSION: ${APP_VERSION:-dev}
+    environment:
+      QS_DATABASE_URL: postgresql+psycopg://quadstick:${QS_DB_PASSWORD:-quadstick}@db:5432/quadstick
+      QS_SEED_ON_START: "1"
+    volumes:
+      # Exported CSVs land here, inside the checkout. Point QS_EXPORTS_HOST at
+      # a folder inside a TOS share to reach them over SMB — see
+      # docs/DEPLOY-NAS.md.
+      - ${QS_EXPORTS_HOST:-./exports}:/app/exports
+    ports:
+      - "${QS_API_PORT:-8325}:8000"
+    healthcheck:                    # /health stays unprefixed; the app is served under /api
+      test: ["CMD-SHELL", "python -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3).status==200 else 1)\""]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 40s
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
+  web:
+    build:
+      context: .
+      dockerfile: web/Dockerfile
+      args:
+        APP_VERSION: ${APP_VERSION:-dev}
+    ports:
+      - "${QS_WEB_PORT:-8324}:80"
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+

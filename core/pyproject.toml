@@ -1,0 +1,21 @@
+[project]
+name = "qsprofile"
+version = "0.1.0"
+description = "QuadStick profile parsing, validation, console conversion and printable reference cards"
+requires-python = ">=3.10"
+dependencies = ["openpyxl>=3.1"]
+[project.optional-dependencies]
+dev = ["pytest>=8", "playwright>=1.40"]
+[project.scripts]
+qsprofile = "qsprofile.cli:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+[tool.setuptools.packages.find]
+where = ["."]
+# render.py embeds assets/front.webp as a data: URI, so it must travel with an
+# installed package (the API imports qsprofile, it does not read the repo).
+[tool.setuptools.package-data]
+# keywords/*.txt are the kb_* / ir_* output lists the catalog loads at import.
+qsprofile = ["assets/*.webp", "keywords/*.txt"]
