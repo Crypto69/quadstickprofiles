@@ -69,6 +69,9 @@ python desktop/launcher.py --headless    # server only; prints the URL
   a signed but un-notarised Developer ID app is still blocked by Gatekeeper. The
   release notes only claim "signed and notarised" when `notarize.sh` actually
   succeeded, and otherwise carry the right-click → *Open* instructions.
+  `sh desktop/set_github_secrets.sh` loads all five from a local folder
+  (`~/Desktop/qs-signing` by default, see the script header for the file names)
+  without printing any of them; delete the folder afterwards.
 
   Changing the bundle identifier after a signed release makes macOS treat it as a
   different app, so it stays `ai.myaccessibility.quadstickprofilestudio`.
