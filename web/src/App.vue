@@ -1,11 +1,13 @@
 <script setup lang="ts">
-import { onMounted } from 'vue'
+import { onMounted, ref } from 'vue'
 import { RouterLink, RouterView } from 'vue-router'
 import { useCatalogStore } from '@/stores/catalog'
+import AboutDialog from '@/components/AboutDialog.vue'
 import logoMark from '@/assets/logo-mark.png'
 
 const catalog = useCatalogStore()
 const appVersion = __APP_VERSION__
+const aboutOpen = ref(false)
 
 // The catalog gates every keyword the UI can offer, so it loads before anything else.
 onMounted(() => {
@@ -31,8 +33,11 @@ onMounted(() => {
     </nav>
     <div class="spacer" />
     <p v-if="catalog.loading" class="hint" role="status">Loading the keyword catalog…</p>
+    <button class="about-btn" type="button" @click="aboutOpen = true">About</button>
     <span class="version" title="Deployed version">v{{ appVersion }}</span>
   </header>
+
+  <AboutDialog :open="aboutOpen" @close="aboutOpen = false" />
 
   <p v-if="catalog.error" class="banner banner--error" role="alert">
     Could not reach the API: {{ catalog.error }}
@@ -98,6 +103,26 @@ nav a:hover {
 nav a.router-link-exact-active {
   background: var(--mode-soft);
   color: var(--mode);
+}
+
+/* styled as the nav links are: this is a menu item that opens a dialog */
+.about-btn {
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--target);
+  padding: 0 var(--sp-3);
+  border: 0;
+  border-radius: var(--radius);
+  background: none;
+  color: var(--ink-soft);
+  font: inherit;
+  font-weight: 600;
+  font-size: var(--text-sm);
+  cursor: pointer;
+}
+.about-btn:hover {
+  background: var(--paper-sunk);
+  color: var(--ink);
 }
 
 .version {

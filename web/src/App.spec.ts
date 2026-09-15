@@ -28,4 +28,47 @@ describe('App header', () => {
     // "dev" under vitest; deploy.sh bakes 1.0, 1.1 ... into the real build
     expect(badge.text()).toBe('vdev')
   })
+
+  it('opens the About dialog from the header, with the accessibility links', async () => {
+    const w = mount(App, {
+      attachTo: document.body,
+      global: { stubs: { RouterLink: RouterLinkStub, RouterView: RouterViewStub } },
+    })
+
+    const about = w.find('header .about-btn')
+    expect(about.text()).toBe('About')
+    expect(document.querySelector('[role="dialog"]')).toBeNull()
+
+    await about.trigger('click')
+
+    const dialog = document.querySelector('[role="dialog"]')
+    expect(dialog).not.toBeNull()
+    expect(dialog?.getAttribute('aria-label')).toBe('About QuadStick Profile Studio')
+
+    const hrefs = [...dialog!.querySelectorAll('a')].map((a) => a.getAttribute('href'))
+    expect(hrefs).toEqual(
+      expect.arrayContaining([
+        'https://myaccessibility.ai',
+        'https://www.youtube.com/@myaccessibility',
+        'https://www.instagram.com/myaccessibility',
+        'https://www.linkedin.com/in/chris-venter/',
+      ]),
+    )
+    // external links must not hand the opener a window handle
+    for (const a of dialog!.querySelectorAll('a[target="_blank"]')) {
+      expect(a.getAttribute('rel')).toContain('noopener')
+    }
+
+    // each link carries its platform icon, hidden from screen readers: the label names it
+    const linkItems = [...dialog!.querySelectorAll('.links li')]
+    expect(linkItems).toHaveLength(4)
+    for (const li of linkItems) {
+      const icon = li.querySelector('svg.icon')
+      expect(icon).not.toBeNull()
+      expect(icon?.getAttribute('aria-hidden')).toBe('true')
+      expect(icon?.querySelector('path')?.getAttribute('d')).toBeTruthy()
+    }
+
+    w.unmount()
+  })
 })
