@@ -100,7 +100,7 @@ class Mode(Base):
                                             index=True)
     position: Mapped[int] = mapped_column(SmallInteger, nullable=False)     # = mode number
     name: Mapped[str] = mapped_column(Text, nullable=False)                 # sheet tab name
-    label: Mapped[str] = mapped_column(Text, nullable=False)                # C1
+    label: Mapped[str] = mapped_column(Text, nullable=False)                # C1: the name, or '' (bridge.device_label)
     channel: Mapped[str] = mapped_column(Text, nullable=False, default="usb", server_default="usb")
 
     profile: Mapped[Profile] = relationship(back_populates="modes")

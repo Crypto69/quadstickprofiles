@@ -34,7 +34,7 @@ create table modes (
   profile_id  bigint not null references profiles on delete cascade,
   position    smallint not null check (position between 1 and 16),  -- = mode number
   name        text not null,                   -- tab name ("Sprint")
-  label       text not null,                   -- C1 ("Left joy")
+  label       text not null,                   -- C1: the mode's name, or '' for a blank cell
   channel     text not null default 'usb',     -- C3: none | usb | bluetooth | both (2373)
   unique (profile_id, position)
 );

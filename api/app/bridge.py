@@ -58,7 +58,8 @@ def fill_profile_from_config(db: Session, p: M.Profile, cfg: Config):
         p.modes = []
         db.flush()
     for mode in cfg.modes:
-        m = M.Mode(position=mode.number, name=mode.name, label=mode.label, channel=mode.channel or "usb")
+        m = M.Mode(position=mode.number, name=mode.name, label=device_label(mode.name, mode.label),
+                   channel=mode.channel or "usb")
         for i, mp in enumerate(mode.mappings):
             if mp.kind == "preference":       # per-mode override: key in A, B as read, value in C
                 check_preference(mp.output)
@@ -93,11 +94,23 @@ def profile_from_config(db: Session, cfg: Config, *, game: str | None = None,
 
 
 # ------------------------------------------------------------- rows -> Config
+def device_label(name: str, label: str | None) -> str:
+    """What goes in C1 of a mode's `Profile Name` row, on the device and in the
+    exported sheet: the mode's name, the one the editor shows (decided 2026-11-19).
+    A workbook can carry a different C1 under each tab (a copied tab keeps the old
+    cell), and exporting that hidden cell gave the device names the owner never saw.
+    The stored `label` is only what the imported file held. Blank is the exception:
+    `Profile Name,,,` is legal on the device, the name shown for it ("Mode 2") is a
+    stand-in, and the cell stays blank so the file exports as it came in."""
+    return name if label else ""
+
+
 def config_from_profile(p: M.Profile) -> Config:
     cfg = Config(name=p.name, filename=p.csv_filename, game=p.game or "", console=p.console,
                  source_url=p.source_url or "", format_version=p.format_version or "Version 1.4")
     for m in p.modes:
-        mode = CMode(number=m.position, name=m.name, label=m.label, channel=m.channel)
+        mode = CMode(number=m.position, name=m.name, label=device_label(m.name, m.label),
+                     channel=m.channel)
         for r in m.mappings:
             if r.kind == "preference":
                 mode.mappings.append(CMapping(row=r.row_order + ROW_OFFSET, output=r.pref_key,

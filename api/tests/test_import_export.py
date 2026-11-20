@@ -1,8 +1,10 @@
 """Import -> DB -> export must be byte-identical to the device files, exactly as
-tests/test_roundtrip.py proves for the core package, but through the API."""
+tests/test_roundtrip.py proves for the core package, but through the API. The one
+difference is deliberate: a sheet's modes export under their tab names, not under
+the C1 cell the add-on reads (bridge.device_label)."""
 import pytest
-from qsprofile import load
-from conftest import FIXTURES, upload
+from qsprofile import Config, Mapping, Mode, load, write_xlsx
+from conftest import FIXTURES, upload, with_tab_names
 
 
 @pytest.mark.parametrize("name", ["ddfortnite.csv", "cod.csv"])
@@ -18,7 +20,9 @@ def test_device_csv_import_export_is_identical(client, name):
     ("ddfortnite.xlsx", "ddfortnite.csv", "ddfortnite"),
     ("Call_of_Duty.xlsx", "cod.csv", "Call of Duty"),
 ])
-def test_google_sheet_xlsx_import_exports_the_addon_bytes(client, xlsx, csvname, title):
+def test_google_sheet_xlsx_import_exports_the_addon_bytes_under_the_tab_names(client, xlsx, csvname, title):
+    """Every byte the add-on wrote, except the mode names: the add-on reads C1
+    ("Left joy" on four of the Fortnite tabs), this app writes the tab name."""
     real, _ = load(str(FIXTURES / csvname))
     p = upload(client, FIXTURES / xlsx)["profile"]
     # the sheet download carries neither the sheet URL nor its title; the user sets them
@@ -26,7 +30,63 @@ def test_google_sheet_xlsx_import_exports_the_addon_bytes(client, xlsx, csvname,
     assert r.status_code == 200, r.text
     r = client.get(f"/profiles/{p['id']}/export.csv")
     assert r.status_code == 200, r.text
-    assert r.content == (FIXTURES / csvname).read_bytes()
+    addon = (FIXTURES / csvname).read_bytes()
+    assert r.content == with_tab_names(addon, FIXTURES / xlsx)
+    assert r.content != addon                      # these sheets do carry a different C1
+
+
+def _mode_names(csv_bytes):
+    return [l.split(",")[2] for l in csv_bytes.decode("ascii").split("\r\n")
+            if l.startswith("Profile Name,,")]
+
+
+def _copied_tabs_xlsx(tmp_path):
+    """A workbook whose tabs were copied from one sheet and renamed: every C1 still
+    says 'Mouse Mode'. This is the file that exported four modes all called that."""
+    cfg = Config(name="dronefly", filename="dronefly.csv")
+    for n, tab in enumerate(["Left Stick", "Right Stick", "Camera Control", "BT Mouse"], start=1):
+        cfg.modes.append(Mode(number=n, name=tab, label="Mouse Mode", channel="usb", mappings=[
+            Mapping(row=4, output="increment_mode", function="normal", params=[], inputs=["right_sip"]),
+            Mapping(row=5, output="left_joy_up", function="normal", params=[], inputs=["up"])]))
+    path = tmp_path / "dronefly.xlsx"
+    write_xlsx(cfg, str(path))
+    assert [m.label for m in load(str(path))[0].modes] == ["Mouse Mode"] * 4
+    return path
+
+
+def test_a_sheet_exports_its_tab_names_not_the_c1_cells(client, tmp_path):
+    tabs = ["Left Stick", "Right Stick", "Camera Control", "BT Mouse"]
+    r = _post(client, _copied_tabs_xlsx(tmp_path))
+    assert r.status_code == 201, r.text
+    p = r.json()["profile"]
+    assert [(m["name"], m["label"]) for m in p["modes"]] == [(t, t) for t in tabs]
+    # the import says once that the C1 cells were not used
+    notes = [f["message"] for f in r.json()["findings"]["findings"] if "C1" in f["message"]]
+    assert len(notes) == 1 and "'Mouse Mode' becomes 'Right Stick'" in notes[0]
+    assert _mode_names(client.get(f"/profiles/{p['id']}/export.csv").content) == tabs
+    # and the exported sheet carries the same name in the tab and in C1
+    out = tmp_path / "again.xlsx"
+    out.write_bytes(client.get(f"/profiles/{p['id']}/export.xlsx").content)
+    assert [(m.name, m.label) for m in load(str(out))[0].modes] == [(t, t) for t in tabs]
+
+
+def test_a_profile_stored_with_a_different_label_exports_its_name(client, db, tmp_path):
+    """Rows imported before the rule still hold the sheet's C1. Nothing rewrites
+    them; the export, the card and GET read the name instead."""
+    from app import models as M
+    p = _post(client, _copied_tabs_xlsx(tmp_path)).json()["profile"]
+    for m in db.query(M.Mode).filter(M.Mode.profile_id == p["id"]):
+        m.label = "Mouse Mode"
+    db.commit()
+    tabs = [m["name"] for m in p["modes"]]
+    assert _mode_names(client.get(f"/profiles/{p['id']}/export.csv").content) == tabs
+    doc = client.get(f"/profiles/{p['id']}").json()
+    assert [m["label"] for m in doc["modes"]] == tabs
+    assert "Mouse Mode" not in client.get(f"/profiles/{p['id']}/card.html").text
+    # a save sends a label too; whatever it says, the name is what is kept
+    doc["modes"][1]["label"] = "Mouse Mode"
+    assert client.put(f"/profiles/{p['id']}", json=doc).status_code == 200
+    assert _mode_names(client.get(f"/profiles/{p['id']}/export.csv").content) == tabs
 
 
 def test_export_writes_a_copy_into_the_exports_share(client, tmp_path):

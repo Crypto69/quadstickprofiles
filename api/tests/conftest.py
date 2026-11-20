@@ -117,6 +117,19 @@ def db(Session):
         yield s
 
 
+def with_tab_names(csv_bytes: bytes, xlsx: pathlib.Path) -> bytes:
+    """The device file the add-on wrote for a sheet, with each mode's C1 replaced by
+    its tab name: what this app exports for that sheet (bridge.device_label)."""
+    from qsprofile import load
+    names = iter(m.name for m in load(str(xlsx))[0].modes)
+    lines = csv_bytes.split(b"\r\n")
+    for i, line in enumerate(lines):
+        if line.startswith(b"Profile Name,,"):
+            lines[i] = f"Profile Name,,{next(names)},".encode("ascii")
+    assert next(names, None) is None, "the sheet has more modes than the device file"
+    return b"\r\n".join(lines)
+
+
 def upload(client, path: pathlib.Path, **form):
     with open(path, "rb") as f:
         r = client.post("/profiles/import", files={"file": (path.name, f)}, data=form)

@@ -102,7 +102,8 @@ the mode and view where it lives.
 
 ### Getting it onto the QuadStick
 
-Export a `.csv` that is byte-identical to what the official add-on produces — then a
+Export a `.csv` in the exact format the official add-on produces, each mode under the
+name you see in the editor — then a
 five-step checklist you can tick off, including the LED counting rule for picking the
 file on the device.
 

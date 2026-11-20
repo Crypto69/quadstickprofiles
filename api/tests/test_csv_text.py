@@ -24,7 +24,7 @@ def test_a_comma_in_a_mode_name_is_refused_on_save_and_reported_by_the_live_chec
     assert client.put(f"/profiles/{p['id']}", json=doc).status_code == 422
     assert client.post("/profiles", json=doc).status_code == 422
     assert any("comma" in m for m in _errors(client, doc))
-    doc = _doc(modes=[{**MODES[0], "label": "Vis\u00e9e"}])              # non-ASCII C1
+    doc = _doc(modes=[{**MODES[0], "name": "Vis\u00e9e"}])               # non-ASCII C1: the name is C1
     assert client.put(f"/profiles/{p['id']}", json=doc).status_code == 422
     assert any("ASCII" in m for m in _errors(client, doc))
     assert client.get(f"/profiles/{p['id']}").json()["modes"][0]["name"] == "M"

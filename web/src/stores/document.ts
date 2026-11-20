@@ -332,8 +332,9 @@ export const useDocumentStore = defineStore('document', () => {
 
   /**
    * A mode's name and its label are one thing on the device (the C1 cell of the
-   * Profile Name row), so they are renamed together and never differ. Both stay on
-   * the wire because the file format carries both. The mode-scoped game actions
+   * Profile Name row), so they are renamed together. The API writes the name to C1
+   * whatever the label says (an imported sheet can carry a different C1 under each
+   * tab), so the name shown here is the name exported. The mode-scoped game actions
    * are keyed by mode name, so they follow the rename too — otherwise the printed
    * card would lose its labels the moment a mode was renamed.
    */

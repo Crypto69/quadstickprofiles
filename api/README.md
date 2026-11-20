@@ -89,7 +89,7 @@ pytest -q                                             # from the repo root: core
 | GET | `/api/profiles/{id}/validate` | findings + `budget` + `consequence` per severity + `unused_inputs`; the drive-hiding warning uses `HIDDEN_DRIVE_MODES[firmware]` |
 | POST | `/api/profiles/validate` | the same, for an **unsaved** document — the editor's live checks, writes nothing |
 | POST | `/api/profiles/{id}/duplicate?name=&csv_filename=` | copy, including per-mode override rows; defaults the filename to `<stem>_copy.csv` |
-| GET | `/api/profiles/{id}/export.csv?filename=` | device CSV, byte-identical to the add-on; **409** with findings while errors exist |
+| GET | `/api/profiles/{id}/export.csv?filename=` | device CSV in the add-on's format, each mode under its name (the tab name of an imported sheet, not its C1 cell); **409** with findings while errors exist |
 | GET | `/api/profiles/{id}/export.xlsx` | template-layout workbook; same 409 rule |
 | POST | `/api/profiles/{id}/convert` | `{target, name?, csv_filename?}` → new profile + notes + suggested filename |
 | GET | `/api/profiles/{id}/card.html` | printable card; game actions, input names (e.g. `lip` → "Chin switch") and per-mode overrides applied |

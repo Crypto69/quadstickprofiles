@@ -1,7 +1,8 @@
 """Starter profiles: a profile flagged is_template, so "new from template" reuses
 the copy path rather than being a second kind of thing to keep in step."""
 from qsprofile import load, write_csv
-from conftest import ACTIONS, FIXTURES, upload
+from conftest import ACTIONS, FIXTURES, upload, with_tab_names
+from app.bridge import device_label
 from app.seed import seed_fixtures, FIXTURES as SEED_FIXTURES
 
 
@@ -133,7 +134,8 @@ def test_the_seeded_starters_export_their_fixture_bytes(client, db, tmp_path):
     """Seeding is import plus a display name: what a starter exports must be exactly
     what core writes for its fixture, and for the two starters that came from the
     owner's own sheets, exactly the device file once the sheet title and URL (which
-    the download does not carry) are set, as tests/test_roundtrip.py proves for core."""
+    the download does not carry) are set, as tests/test_roundtrip.py proves for core.
+    The modes are the exception: they export under their tab names, not the sheet's C1."""
     seed_fixtures(db, FIXTURES, ACTIONS)
     templates = {t["name"]: t for t in client.get("/profiles", params={"templates": "true"}).json()}
     for fname, (_actions, display, note) in SEED_FIXTURES.items():
@@ -141,6 +143,8 @@ def test_the_seeded_starters_export_their_fixture_bytes(client, db, tmp_path):
             continue
         cfg, _ = load(str(FIXTURES / fname))
         cfg.name = display
+        for m in cfg.modes:                       # a mode exports under its tab name
+            m.label = device_label(m.name, m.label)
         out = tmp_path / f"{display}.csv"
         write_csv(cfg, str(out))
         r = client.get(f"/profiles/{templates[display]['id']}/export.csv")
@@ -151,7 +155,8 @@ def test_the_seeded_starters_export_their_fixture_bytes(client, db, tmp_path):
         t = templates[SEED_FIXTURES[xlsx][1]]
         r = client.patch(f"/profiles/{t['id']}", json={"name": real.name, "source_url": real.source_url})
         assert r.status_code == 200, r.text
-        assert client.get(f"/profiles/{t['id']}/export.csv").content == (FIXTURES / csvname).read_bytes()
+        assert client.get(f"/profiles/{t['id']}/export.csv").content == \
+            with_tab_names((FIXTURES / csvname).read_bytes(), FIXTURES / xlsx)
     # and the device CSVs seeded as ordinary profiles differ from the stick only by display name
     library = {p["name"]: p for p in client.get("/profiles").json()}
     for fname, (_actions, display, note) in SEED_FIXTURES.items():

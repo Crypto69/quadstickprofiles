@@ -35,7 +35,7 @@ here; verifying it needs a real device file with an IR block as a fixture:
 | cell | content |
 |---|---|
 | A1 | `Profile Name` |
-| C1 | mode label shown to the user, e.g. `Left joy`, `D-Pad` |
+| C1 | mode label shown to the user, e.g. `Left joy`, `D-Pad`. The app writes the mode's name here on export (see below) |
 | A2 | CSV filename, **first mode sheet only**, e.g. `ddfortnite.csv` |
 | C2 | `Normal` |
 | A3 | `Output or Function` (PlayStation names) **or** `XBox Outputs` (Xbox names) |
@@ -61,6 +61,17 @@ Sheet (tab) names are Excel's business, not the device's: `write_xlsx` replaces
 `[ ] : * ? / \` with `-`, cuts at 31 characters and appends ` 2`, ` 3`, … to a
 duplicate (case-insensitive, and `Preferences` is reserved), so a mode called
 `A/B?` still exports. The C1 label, which is what the device shows, is untouched.
+
+**One name per mode (decided 2026-11-19).** A workbook holds two names for a mode: the
+tab and the C1 cell. The official add-on writes C1 to the device and ignores the tab,
+so a tab copied and renamed (`Right Stick`) keeps exporting the old cell (`Mouse
+Mode`). The app shows one name, the tab's, and writes that one to C1 in both the
+`.csv` and the `.xlsx` export. An import whose C1 cells differ says so once, as a note.
+So a Google-Sheet `.xlsx` whose C1 differs from its tab exports a `.csv` that differs
+from the add-on's in the `Profile Name` lines and nowhere else. A blank C1
+(`Profile Name,,,`) stays blank. `core/qsprofile` itself still reads and writes C1 as
+the file holds it (the `qsprofile` CLI behaves like the add-on); the rule is the API's,
+in `api/app/bridge.py` (`device_label`).
 Older Xbox templates carry an "Alternate" block in K–R (K1 label, K2 `Alternate`,
 K3 `usb`); the device treats it as comments. The parser ignores it and says so.
 

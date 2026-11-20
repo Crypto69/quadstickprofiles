@@ -15,7 +15,7 @@ from qsprofile import catalog as C
 from qsprofile.catalog import check_csv_filename
 from qsprofile.validate import budget as core_budget
 from .. import models as M, schemas as S
-from ..bridge import (profile_from_config, config_from_profile,
+from ..bridge import (profile_from_config, config_from_profile, device_label,
                       actions_for_profile, findings_for_profile, has_errors, ensure_output,
                       ROW_OFFSET)
 from ..db import get_session
@@ -114,7 +114,8 @@ def _out(p: M.Profile) -> S.ProfileOut:
         firmware=p.firmware, notes=p.notes,
         source_url=p.source_url, is_template=p.is_template, template_note=p.template_note,
         format_version=p.format_version, created_at=_iso(p.created_at), updated_at=_iso(p.updated_at),
-        modes=[S.ModeOut(id=m.id, position=m.position, name=m.name, label=m.label, channel=m.channel,
+        modes=[S.ModeOut(id=m.id, position=m.position, name=m.name,
+                         label=device_label(m.name, m.label), channel=m.channel,
                          mappings=[_mapping_out(r) for r in m.mappings])
                for m in p.modes],
         preferences={x.key: x.value for x in p.preferences},
@@ -133,10 +134,11 @@ def _modes_from_body(db: Session | None, modes: list[S.ModeIn]) -> list[M.Mode]:
     8-input cap and the preference-key check."""
     out = []
     for pos, mode in enumerate(modes, start=1):
-        # C1 may be blank on the device (`Profile Name,,,`): an explicit '' stays '', so
-        # GET -> PUT -> export is byte-identical; only an absent label falls back to name.
+        # C1 is the mode's name (see bridge.device_label), whatever label the body sent.
+        # It may be blank on the device (`Profile Name,,,`): an explicit '' stays '', so
+        # GET -> PUT -> export is byte-identical; an absent label is the name too.
         m = M.Mode(position=pos, name=mode.name, channel=mode.channel,
-                   label=mode.label if mode.label is not None else mode.name)
+                   label=device_label(mode.name, mode.name if mode.label is None else mode.label))
         m.mappings = []
         for i, mp in enumerate(mode.mappings):
             if mp.kind == "preference":
@@ -287,6 +289,17 @@ async def import_profile(file: UploadFile = File(...), game: str | None = Form(N
         raise HTTPException(422, f"name: '{name[:30]}' {problem}")
     if name:
         cfg.name = name
+    # a mode is called what its tab is called, and that is what the export writes in C1
+    # (bridge.device_label). A sheet whose C1 says something else is told so, once, and
+    # the findings below then describe the profile as it is stored.
+    renamed = [f"'{m.label}' becomes '{m.name}'" for m in cfg.modes if m.label and m.label != m.name]
+    if renamed:
+        problems.append(("info", None, None,
+                         "Each mode is named after its sheet tab, and the export writes that name "
+                         "to the QuadStick. The label in cell C1 differed and is not used: "
+                         + "; ".join(renamed)))
+    for m in cfg.modes:
+        m.label = device_label(m.name, m.label)
     import_findings = _merge_findings(problems, findings_for_profile(M.Profile(firmware=firmware), cfg))
 
     def refuse(why: str):
@@ -416,7 +429,8 @@ def _export_target(name: str) -> Path:
 @router.get("/{profile_id}/export.csv")
 def export_csv(profile_id: int, filename: str | None = Query(None, description="override the .csv filename"),
                db: Session = Depends(get_session)):
-    """Device CSV, byte-identical to the QuadStick add-on. Also written to the exports/ share."""
+    """Device CSV in the QuadStick add-on's format, each mode under the name the editor
+    shows. Also written to the exports/ share."""
     return _export(db, profile_id, "csv", filename)
 
 

@@ -266,8 +266,9 @@ class ModeIn(BaseModel):
     # no 31-character cap (see ModeOut): a device CSV's C1 label becomes the mode name,
     # and what an import stored must PUT back. Core has no length rule for C1 either.
     name: str = Field(min_length=1)
-    label: str | None = None                  # C1. Absent: the name stands in. "": the C1 cell is
-                                              # blank on the device, and stays blank (see profiles.py)
+    label: str | None = None                  # C1 is the name (bridge.device_label); only blank
+                                              # is read from here. "": the C1 cell is blank on the
+                                              # device, and stays blank (see profiles.py)
     # not the `Channel` Literal: an import stores C3 as the file held it, and what GET
     # returns must PUT back, or one off-catalog channel would freeze every later save
     # of the profile. core's validate() errors on an unknown channel and export is
