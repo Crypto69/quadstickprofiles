@@ -18,7 +18,10 @@ MIGRATION_INDEXES = {
     "ix_modes_profile_id", "ix_mappings_mode_id", "ix_mappings_kind",
     "ix_preferences_profile_id", "ix_game_actions_profile_id",
     "ix_game_actions_game", "ix_profiles_is_template",
+    "ix_drive_backup_files_backup_id",                                  # 0007
 }
+# Tables a migration after 0005 creates. A file that predates them must not have them.
+TABLES_AFTER_0005 = {"drive_backups", "drive_backup_files"}
 
 
 @pytest.fixture
@@ -62,6 +65,8 @@ def test_a_desktop_file_created_before_the_fix_gets_the_missing_indexes(fresh):
     """The shape tag v1.0 shipped: tables without indexes, stamped at 0005.
     `prepare_schema` runs 0006, which must fill them in."""
     for table in Base.metadata.sorted_tables:                 # build the pre-fix schema
+        if table.name in TABLES_AFTER_0005:
+            continue
         table.create(fresh)
         for index in table.indexes:
             index.drop(fresh)
@@ -74,6 +79,24 @@ def test_a_desktop_file_created_before_the_fix_gets_the_missing_indexes(fresh):
     for table in Base.metadata.sorted_tables:
         seen |= index_names(fresh, table.name)
     assert seen == MIGRATION_INDEXES
+
+
+def test_a_desktop_file_stamped_at_0006_gets_the_backup_tables(fresh):
+    """What a v1.x desktop install has today: every table but the backup ones,
+    stamped at 0006. Its next launch must run 0007 on SQLite and end up with
+    exactly what create_all would have built."""
+    for table in Base.metadata.sorted_tables:
+        if table.name not in TABLES_AFTER_0005:
+            table.create(fresh)
+    command.stamp(alembic_config(fresh), "0006_indexes_for_desktop")
+
+    assert prepare_schema(fresh) == "upgraded"
+
+    assert TABLES_AFTER_0005 <= set(inspect(fresh).get_table_names())
+    for name in TABLES_AFTER_0005:
+        table = Base.metadata.tables[name]
+        assert {c["name"] for c in inspect(fresh).get_columns(name)} == set(table.columns.keys())
+        assert index_names(fresh, name) == {i.name for i in table.indexes}
 
 
 def test_tables_without_a_stamp_are_refused(fresh):

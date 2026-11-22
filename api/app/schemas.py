@@ -552,3 +552,17 @@ class FromTemplateIn(BaseModel):
 
     _fn = field_validator("csv_filename")(_check_filename)
     _line1 = field_validator("name")(_line1)
+
+
+# ---------------------------------------------------------------- flash-drive backups
+class BackupFileOut(BaseModel):
+    path: str           # relative to the drive's top level, '/'-separated
+    size: int
+
+
+class BackupOut(BaseModel):
+    id: int
+    created_at: str     # ISO 8601 with its UTC offset, so the browser shows local time
+    file_count: int
+    total_bytes: int
+    files: list[BackupFileOut]

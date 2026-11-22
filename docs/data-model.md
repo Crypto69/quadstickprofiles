@@ -135,3 +135,8 @@ common ones explicitly and keep the regex as the fallback validator.
   column B. `ck_mappings_shape` gains: a mapping row has no `column_b`, an
   override row has no `function`. Existing override rows' dummy `normal` becomes
   NULL. The downgrade puts `normal` back and drops `column_b`.
+- Migration `0007_drive_backups` adds `drive_backups (id, created_at)` and
+  `drive_backup_files (backup_id, path, size, data)`: every file read off the
+  QuadStick's flash drive at one moment, bytes as read (`bytea` / `BLOB`), path
+  relative to the drive's top level. Unique per backup on `path`. Two new tables
+  and nothing else, so it runs unchanged on SQLite.

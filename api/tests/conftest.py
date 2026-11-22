@@ -68,7 +68,7 @@ def Session(engine):
 def clean_db(engine, Session):
     """Fresh profiles for every test; catalogs re-seeded (cheap, idempotent)."""
     with Session() as db:
-        for t in ("input_names", "game_actions", "preferences", "mapping_inputs", "mappings", "modes", "profiles"):
+        for t in ("drive_backup_files", "drive_backups", "input_names", "game_actions", "preferences", "mapping_inputs", "mappings", "modes", "profiles"):
             db.execute(Base.metadata.tables[t].delete())
         db.commit()
         seed_catalogs(db)

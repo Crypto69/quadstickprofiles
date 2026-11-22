@@ -95,6 +95,9 @@ pytest -q                                             # from the repo root: core
 | GET | `/api/profiles/{id}/card.html` | printable card; game actions, input names (e.g. `lip` → "Chin switch") and per-mode overrides applied |
 | GET | `/api/tester/spec` | the tester page's map: per `qstest` mode, the d-pad direction it holds and which report bit is which input (`core/qsprofile/tester.py`) |
 | GET | `/api/tester/qstest.csv` | the `qstest` profile the tester needs on the device; generated from the same table, also written to `exports/` |
+| GET / POST | `/api/backups` | flash-drive backups, newest first (names and sizes); POST is multipart `files` + `paths` (each file's path on the drive), stored byte for byte |
+| GET | `/api/backups/{id}/download.zip?filename=` | the backup as one .zip whose top level is the drive's; also written to `exports/` |
+| DELETE | `/api/backups/{id}` | forget a backup |
 | GET | `/api/health`, `/health` | liveness; `/health` stays unprefixed for the container health check |
 
 Every output / input / function in a write body is checked against the

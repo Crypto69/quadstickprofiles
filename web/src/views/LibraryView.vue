@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 import { RouterLink } from 'vue-router'
+import DriveBackups from '@/components/DriveBackups.vue'
 import ExportChecklist from '@/components/ExportChecklist.vue'
 import FindingsList from '@/components/FindingsList.vue'
 import ModalDialog from '@/components/ModalDialog.vue'
@@ -306,6 +307,8 @@ const suggestedFilename = computed(
       Import the <b>.xlsx</b> you downloaded from the Google Sheet (File → Download → Excel), or a
       <b>.csv</b> copied off the QuadStick. Nothing is sent anywhere; this runs on your own machine.
     </p>
+
+    <DriveBackups />
 
     <!-- Filters. Only groups that can actually narrow the list appear; with one profile,
          or one kind of profile, the whole bar would be clutter above the answer. -->

@@ -9,7 +9,7 @@ channel from each mode's C3, so those are the only places the app keeps them.
 Postgres-only CHECK constraints (regex) live in the Alembic migration; the API
 layer enforces the same rules with Pydantic so SQLite test runs behave the same."""
 from datetime import datetime
-from sqlalchemy import (BigInteger, Boolean, Integer, SmallInteger, Text, ForeignKey, JSON, DateTime,
+from sqlalchemy import (BigInteger, Boolean, Integer, LargeBinary, SmallInteger, Text, ForeignKey, JSON, DateTime,
                         UniqueConstraint, CheckConstraint, func, text)
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -180,3 +180,26 @@ class InputName(Base):
     profile_id: Mapped[int] = mapped_column(ForeignKey("profiles.id", ondelete="CASCADE"), primary_key=True)
     input: Mapped[str] = mapped_column(ForeignKey("input_catalog.name"), primary_key=True)
     name: Mapped[str] = mapped_column(Text, nullable=False)
+
+
+class DriveBackup(Base):
+    """Every file copied off the QuadStick's flash drive at one moment, so the drive
+    can be put back exactly as it was. The bytes are kept as read, never parsed:
+    a backup has to hold a file this app cannot read just as faithfully as one it can."""
+    __tablename__ = "drive_backups"
+    id: Mapped[int] = mapped_column(PK, primary_key=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False,
+                                                 server_default=func.now())
+    files: Mapped[list["DriveBackupFile"]] = relationship(cascade="all, delete-orphan",
+                                                          order_by="DriveBackupFile.path")
+
+
+class DriveBackupFile(Base):
+    __tablename__ = "drive_backup_files"
+    __table_args__ = (UniqueConstraint("backup_id", "path", name="uq_drive_backup_files_path"),)
+    id: Mapped[int] = mapped_column(PK, primary_key=True)
+    backup_id: Mapped[int] = mapped_column(ForeignKey("drive_backups.id", ondelete="CASCADE"),
+                                           nullable=False, index=True)
+    path: Mapped[str] = mapped_column(Text, nullable=False)     # relative to the drive's top level, '/'-separated
+    size: Mapped[int] = mapped_column(Integer, nullable=False)  # so the list never has to load the bytes
+    data: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)

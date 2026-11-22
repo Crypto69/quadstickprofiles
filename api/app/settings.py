@@ -30,6 +30,11 @@ class Settings(BaseSettings):
     # nginx caps /api/ at the same size, but the API is also published unproxied
     # (docker-compose 8325) and the desktop build has no proxy at all.
     max_upload_bytes: int = 2 * 1024 * 1024
+    # Biggest whole-drive backup (QS_MAX_BACKUP_BYTES). Each file is still capped at
+    # max_upload_bytes; the drive holds .csv profiles and joystick.bin (the firmware
+    # deletes everything else at boot), so 20 MB is far more than a full stick.
+    # web/nginx.conf allows the same on POST /api/backups.
+    max_backup_bytes: int = 20 * 1024 * 1024
 
 
 settings = Settings()

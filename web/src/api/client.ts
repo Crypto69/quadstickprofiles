@@ -1,7 +1,7 @@
 // Typed client for the FastAPI service. Every path is relative, so the same build
 // works behind the nginx proxy and against the Vite dev proxy.
 import type {
-  Catalog, ConvertResult, ImportResult, Prefs, Profile, ProfileCreate, ProfilePatch,
+  Backup, Catalog, ConvertResult, ImportResult, Prefs, Profile, ProfileCreate, ProfilePatch,
   ProfileSummary, Validation,
 } from './types'
 import type { TesterSpec } from '@/tester/decode'
@@ -213,6 +213,26 @@ export const api = {
 
   exportPrefs: (firmware?: number | null) =>
     download(`/prefs/export.csv${qs({ firmware })}`, 'prefs.csv'),
+
+  // ---------------------------------------------------------------- drive backups
+  /** Every backup of the QuadStick's flash drive, newest first. Names and sizes only. */
+  listBackups: () => request<Backup[]>('/backups'),
+
+  /** Store every file read off the drive; `path` is where it sits on the drive. */
+  createBackup: (files: { path: string; data: Blob }[]) => {
+    const form = new FormData()
+    for (const f of files) {
+      form.append('files', f.data, f.path.split('/').pop())
+      form.append('paths', f.path)
+    }
+    return request<Backup>('/backups', { method: 'POST', body: form })
+  },
+
+  /** The backup as one .zip whose top level is the drive's; also written to exports/. */
+  downloadBackup: (id: number, filename: string) =>
+    download(`/backups/${id}/download.zip${qs({ filename })}`, filename),
+
+  deleteBackup: (id: number) => request<void>(`/backups/${id}`, { method: 'DELETE' }),
 
   // ---------------------------------------------------------------- tester
   /** Which report bit is which input in each qstest mode (core/qsprofile/tester.py). */

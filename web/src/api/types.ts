@@ -248,3 +248,19 @@ export interface Prefs {
   preferences: Record<string, string>
   validation: Validation
 }
+
+// ---------------------------------------------------------------- flash-drive backups
+export interface BackupFile {
+  /** Relative to the drive's top level, '/'-separated. */
+  path: string
+  size: number
+}
+
+export interface Backup {
+  id: number
+  /** ISO 8601 with its UTC offset; shown in the browser's own time zone. */
+  created_at: string
+  file_count: number
+  total_bytes: number
+  files: BackupFile[]
+}
