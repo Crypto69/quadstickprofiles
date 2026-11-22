@@ -94,7 +94,9 @@ if [ "$1" != "--force" ] && [ "$2" != "--force" ]; then
 fi
 
 echo "building quadstick v${APP_VERSION} ${GIT_SHA} (${BUILD_TIME})"
-docker compose build
+# --pull: fetch the newest base images (nginx stable, node, python) every time,
+# so security patches land on the next deploy instead of whenever the cache expires
+docker compose build --pull
 docker compose up -d
 
 # db and api have health checks; web waits on api. Give them a moment, then say
