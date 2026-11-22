@@ -33,6 +33,7 @@ npm run build          # type-check then build to dist/
 | `src/stores/profiles.ts` | the Library's list and every action; a refused export lands in `blocked`, not `error`, so the UI can say *why* |
 | `src/components/ExportChecklist.vue` | the manual last step: copy the file, don't touch `default.csv`, then long hard sip → joystick → lip press |
 | `src/views/LibraryView.vue` | Stage 1: list, search, import, export, print, duplicate, convert, delete |
+| `src/views/TesterView.vue` | the QuadStick tester: reads the device over WebHID (`src/tester/hid.ts`), decodes the raw report with the spec the API generates alongside `qstest.csv` (`src/tester/decode.ts`), and runs the guided test (`src/tester/guided.ts`, pure, clock injected) |
 | `src/views/EditorView.vue` | the profile editor: firmware budget, mode rail, mapping grid, live checks |
 
 ## Design rules these files follow

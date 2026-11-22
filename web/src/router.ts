@@ -15,6 +15,7 @@ export const router = createRouter({
       name: 'device',
       component: () => import('@/views/DeviceSettingsView.vue'),
     },
+    { path: '/tester', name: 'tester', component: () => import('@/views/TesterView.vue') },
     { path: '/learn', name: 'learn', component: () => import('@/views/LearnView.vue') },
     {
       path: '/learn/:slug',

@@ -93,6 +93,8 @@ pytest -q                                             # from the repo root: core
 | GET | `/api/profiles/{id}/export.xlsx` | template-layout workbook; same 409 rule |
 | POST | `/api/profiles/{id}/convert` | `{target, name?, csv_filename?}` → new profile + notes + suggested filename |
 | GET | `/api/profiles/{id}/card.html` | printable card; game actions, input names (e.g. `lip` → "Chin switch") and per-mode overrides applied |
+| GET | `/api/tester/spec` | the tester page's map: per `qstest` mode, the d-pad direction it holds and which report bit is which input (`core/qsprofile/tester.py`) |
+| GET | `/api/tester/qstest.csv` | the `qstest` profile the tester needs on the device; generated from the same table, also written to `exports/` |
 | GET | `/api/health`, `/health` | liveness; `/health` stays unprefixed for the container health check |
 
 Every output / input / function in a write body is checked against the

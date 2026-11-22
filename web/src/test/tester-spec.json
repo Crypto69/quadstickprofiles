@@ -1,0 +1,445 @@
+{
+ "profile": "qstest",
+ "filename": "qstest.csv",
+ "inputs": {
+  "mp_left_sip": {
+   "tubes": [
+    "left"
+   ],
+   "action": "sip",
+   "level": "hard"
+  },
+  "mp_left_sip_soft": {
+   "tubes": [
+    "left"
+   ],
+   "action": "sip",
+   "level": "gentle"
+  },
+  "mp_left_puff": {
+   "tubes": [
+    "left"
+   ],
+   "action": "puff",
+   "level": "hard"
+  },
+  "mp_left_puff_soft": {
+   "tubes": [
+    "left"
+   ],
+   "action": "puff",
+   "level": "gentle"
+  },
+  "mp_center_sip": {
+   "tubes": [
+    "center"
+   ],
+   "action": "sip",
+   "level": "hard"
+  },
+  "mp_center_sip_soft": {
+   "tubes": [
+    "center"
+   ],
+   "action": "sip",
+   "level": "gentle"
+  },
+  "mp_center_puff": {
+   "tubes": [
+    "center"
+   ],
+   "action": "puff",
+   "level": "hard"
+  },
+  "mp_center_puff_soft": {
+   "tubes": [
+    "center"
+   ],
+   "action": "puff",
+   "level": "gentle"
+  },
+  "mp_right_sip": {
+   "tubes": [
+    "right"
+   ],
+   "action": "sip",
+   "level": "hard"
+  },
+  "mp_right_sip_soft": {
+   "tubes": [
+    "right"
+   ],
+   "action": "sip",
+   "level": "gentle"
+  },
+  "mp_right_puff": {
+   "tubes": [
+    "right"
+   ],
+   "action": "puff",
+   "level": "hard"
+  },
+  "mp_right_puff_soft": {
+   "tubes": [
+    "right"
+   ],
+   "action": "puff",
+   "level": "gentle"
+  },
+  "mp_left_center_sip": {
+   "tubes": [
+    "left",
+    "center"
+   ],
+   "action": "sip",
+   "level": "hard"
+  },
+  "mp_left_center_sip_soft": {
+   "tubes": [
+    "left",
+    "center"
+   ],
+   "action": "sip",
+   "level": "gentle"
+  },
+  "mp_left_center_puff": {
+   "tubes": [
+    "left",
+    "center"
+   ],
+   "action": "puff",
+   "level": "hard"
+  },
+  "mp_left_center_puff_soft": {
+   "tubes": [
+    "left",
+    "center"
+   ],
+   "action": "puff",
+   "level": "gentle"
+  },
+  "mp_right_center_sip": {
+   "tubes": [
+    "right",
+    "center"
+   ],
+   "action": "sip",
+   "level": "hard"
+  },
+  "mp_right_center_sip_soft": {
+   "tubes": [
+    "right",
+    "center"
+   ],
+   "action": "sip",
+   "level": "gentle"
+  },
+  "mp_right_center_puff": {
+   "tubes": [
+    "right",
+    "center"
+   ],
+   "action": "puff",
+   "level": "hard"
+  },
+  "mp_right_center_puff_soft": {
+   "tubes": [
+    "right",
+    "center"
+   ],
+   "action": "puff",
+   "level": "gentle"
+  },
+  "right_sip_soft": {
+   "tubes": [
+    "side"
+   ],
+   "action": "sip",
+   "level": "gentle"
+  },
+  "right_puff_soft": {
+   "tubes": [
+    "side"
+   ],
+   "action": "puff",
+   "level": "gentle"
+  },
+  "lip": {
+   "tubes": [
+    "lip"
+   ],
+   "action": "press",
+   "level": ""
+  }
+ },
+ "modes": [
+  {
+   "n": 1,
+   "name": "Joystick",
+   "hat": 0,
+   "help": "Move the joystick up, down, left and right. The values show live. The lip button works too.",
+   "map": [
+    {
+     "out": "touch",
+     "byte": 7,
+     "mask": 2,
+     "input": "lip"
+    }
+   ]
+  },
+  {
+   "n": 2,
+   "name": "Hard sips & puffs",
+   "hat": 2,
+   "help": "A firm sip or puff on any of the three mouthpiece tubes.",
+   "map": [
+    {
+     "out": "left_1",
+     "byte": 6,
+     "mask": 1,
+     "input": "mp_left_sip"
+    },
+    {
+     "out": "square",
+     "byte": 5,
+     "mask": 16,
+     "input": "mp_left_puff"
+    },
+    {
+     "out": "triangle",
+     "byte": 5,
+     "mask": 128,
+     "input": "mp_center_sip"
+    },
+    {
+     "out": "x",
+     "byte": 5,
+     "mask": 32,
+     "input": "mp_center_puff"
+    },
+    {
+     "out": "right_1",
+     "byte": 6,
+     "mask": 2,
+     "input": "mp_right_sip"
+    },
+    {
+     "out": "circle",
+     "byte": 5,
+     "mask": 64,
+     "input": "mp_right_puff"
+    },
+    {
+     "out": "touch",
+     "byte": 7,
+     "mask": 2,
+     "input": "lip"
+    }
+   ]
+  },
+  {
+   "n": 3,
+   "name": "Gentle sips & puffs",
+   "hat": 4,
+   "help": "A light sip or puff on any of the three mouthpiece tubes.",
+   "map": [
+    {
+     "out": "left_1",
+     "byte": 6,
+     "mask": 1,
+     "input": "mp_left_sip_soft"
+    },
+    {
+     "out": "square",
+     "byte": 5,
+     "mask": 16,
+     "input": "mp_left_puff_soft"
+    },
+    {
+     "out": "triangle",
+     "byte": 5,
+     "mask": 128,
+     "input": "mp_center_sip_soft"
+    },
+    {
+     "out": "x",
+     "byte": 5,
+     "mask": 32,
+     "input": "mp_center_puff_soft"
+    },
+    {
+     "out": "right_1",
+     "byte": 6,
+     "mask": 2,
+     "input": "mp_right_sip_soft"
+    },
+    {
+     "out": "circle",
+     "byte": 5,
+     "mask": 64,
+     "input": "mp_right_puff_soft"
+    },
+    {
+     "out": "touch",
+     "byte": 7,
+     "mask": 2,
+     "input": "lip"
+    }
+   ]
+  },
+  {
+   "n": 4,
+   "name": "Combinations",
+   "hat": 6,
+   "help": "Two tubes at once: left + centre, or right + centre, hard or gentle. A gentle sip or puff on the side tube shows here too (a hard one changes mode).",
+   "map": [
+    {
+     "out": "square",
+     "byte": 5,
+     "mask": 16,
+     "input": "mp_left_center_puff"
+    },
+    {
+     "out": "x",
+     "byte": 5,
+     "mask": 32,
+     "input": "mp_left_center_sip"
+    },
+    {
+     "out": "circle",
+     "byte": 5,
+     "mask": 64,
+     "input": "mp_right_center_puff"
+    },
+    {
+     "out": "triangle",
+     "byte": 5,
+     "mask": 128,
+     "input": "mp_right_center_sip"
+    },
+    {
+     "out": "left_1",
+     "byte": 6,
+     "mask": 1,
+     "input": "mp_left_center_puff_soft"
+    },
+    {
+     "out": "right_1",
+     "byte": 6,
+     "mask": 2,
+     "input": "mp_left_center_sip_soft"
+    },
+    {
+     "out": "left_2",
+     "byte": 6,
+     "mask": 4,
+     "input": "mp_right_center_puff_soft"
+    },
+    {
+     "out": "right_2",
+     "byte": 6,
+     "mask": 8,
+     "input": "mp_right_center_sip_soft"
+    },
+    {
+     "out": "select",
+     "byte": 6,
+     "mask": 16,
+     "input": "right_sip_soft"
+    },
+    {
+     "out": "start",
+     "byte": 6,
+     "mask": 32,
+     "input": "right_puff_soft"
+    }
+   ]
+  },
+  {
+   "n": 5,
+   "name": "Everything",
+   "hat": 1,
+   "help": "Every single-tube input, hard and gentle, at once. Practise freely. Shows whether a hard sip also registers as a gentle one on the way.",
+   "map": [
+    {
+     "out": "left_1",
+     "byte": 6,
+     "mask": 1,
+     "input": "mp_left_sip"
+    },
+    {
+     "out": "square",
+     "byte": 5,
+     "mask": 16,
+     "input": "mp_left_puff"
+    },
+    {
+     "out": "triangle",
+     "byte": 5,
+     "mask": 128,
+     "input": "mp_center_sip"
+    },
+    {
+     "out": "x",
+     "byte": 5,
+     "mask": 32,
+     "input": "mp_center_puff"
+    },
+    {
+     "out": "right_1",
+     "byte": 6,
+     "mask": 2,
+     "input": "mp_right_sip"
+    },
+    {
+     "out": "circle",
+     "byte": 5,
+     "mask": 64,
+     "input": "mp_right_puff"
+    },
+    {
+     "out": "select",
+     "byte": 6,
+     "mask": 16,
+     "input": "mp_left_sip_soft"
+    },
+    {
+     "out": "left_2",
+     "byte": 6,
+     "mask": 4,
+     "input": "mp_left_puff_soft"
+    },
+    {
+     "out": "right_3",
+     "byte": 6,
+     "mask": 128,
+     "input": "mp_center_sip_soft"
+    },
+    {
+     "out": "left_3",
+     "byte": 6,
+     "mask": 64,
+     "input": "mp_center_puff_soft"
+    },
+    {
+     "out": "start",
+     "byte": 6,
+     "mask": 32,
+     "input": "mp_right_sip_soft"
+    },
+    {
+     "out": "right_2",
+     "byte": 6,
+     "mask": 8,
+     "input": "mp_right_puff_soft"
+    },
+    {
+     "out": "touch",
+     "byte": 7,
+     "mask": 2,
+     "input": "lip"
+    }
+   ]
+  }
+ ]
+}

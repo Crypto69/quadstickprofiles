@@ -13,6 +13,7 @@
     "exactOptionalPropertyTypes": false,
     "jsx": "preserve",
     "isolatedModules": true,
+    "resolveJsonModule": true,
     "verbatimModuleSyntax": true,
     "skipLibCheck": true,
     "noEmit": true,

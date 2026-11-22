@@ -29,6 +29,7 @@ onMounted(() => {
     <nav aria-label="Main">
       <RouterLink to="/">Profiles</RouterLink>
       <RouterLink to="/device">The device</RouterLink>
+      <RouterLink to="/tester">Test it</RouterLink>
       <RouterLink to="/learn">How it works</RouterLink>
     </nav>
     <div class="spacer" />

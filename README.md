@@ -137,6 +137,17 @@ plainly which one wins: the device, then the profile, then the mode.
 
 ![Device settings](docs/screenshots/07-device-settings.webp)
 
+### Test your QuadStick
+
+Plug the QuadStick into the computer, open **Test it** in Chrome or Edge, and see
+every sip, puff, lip press and joystick move light up on the photo the moment the
+QuadStick reports it: blue-green for a sip, orange for a puff, pale for gentle. A
+guided test then asks for one input at a time ("hard sip, left tube"), rings the
+tube to use, and shows what the QuadStick actually registered, so "asked hard, got
+gentle + hard" is visible. It needs a small test profile, `qstest.csv`, which the
+page hands you. The browser reads the device directly (WebHID) and only listens.
+On a NAS this needs the HTTPS address; the desktop app opens it in your browser.
+
 ### Learn how it actually works
 
 Nine short pages — the three parts of a row, files vs modes vs rows, reading the

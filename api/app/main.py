@@ -4,7 +4,7 @@ import os
 
 from fastapi import APIRouter, FastAPI
 from .csrf import install_csrf_guard
-from .routers import catalog, prefs, profiles
+from .routers import catalog, prefs, profiles, tester
 from .settings import settings
 
 API_PREFIX = "/api"
@@ -28,6 +28,7 @@ api = APIRouter(prefix=API_PREFIX)
 api.include_router(catalog.router)
 api.include_router(profiles.router)
 api.include_router(prefs.router)
+api.include_router(tester.router)
 
 
 @api.get("/health", tags=["meta"])

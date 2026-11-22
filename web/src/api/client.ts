@@ -4,6 +4,7 @@ import type {
   Catalog, ConvertResult, ImportResult, Prefs, Profile, ProfileCreate, ProfilePatch,
   ProfileSummary, Validation,
 } from './types'
+import type { TesterSpec } from '@/tester/decode'
 
 export const API_BASE = '/api'
 
@@ -212,6 +213,13 @@ export const api = {
 
   exportPrefs: (firmware?: number | null) =>
     download(`/prefs/export.csv${qs({ firmware })}`, 'prefs.csv'),
+
+  // ---------------------------------------------------------------- tester
+  /** Which report bit is which input in each qstest mode (core/qsprofile/tester.py). */
+  testerSpec: () => request<TesterSpec>('/tester/spec'),
+
+  /** The qstest profile the tester page reads; also written to exports/. */
+  exportTesterProfile: () => download('/tester/qstest.csv', 'qstest.csv'),
 }
 
 export type Api = typeof api
