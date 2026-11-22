@@ -22,13 +22,11 @@ purpose; the app walks you through it after every export.
 3. Open `QuadStick Profile Studio`. The first launch creates the database and loads
    the shipped example profiles.
 
-The builds are not code-signed, so expect one prompt:
-
-- **Windows**: "Windows protected your PC" → *More info* → *Run anyway*. Needs the
-  WebView2 runtime, present on Windows 11 and up-to-date Windows 10; without it the
-  app opens in your browser instead and says so.
-- **macOS**: "cannot be opened because the developer cannot be verified" →
-  right-click the app → *Open*, once.
+- **macOS**: the app is signed and notarised by Apple, so it opens like any other app.
+- **Windows**: the app is not signed, so Windows asks once: "Windows protected your
+  PC" → *More info* → *Run anyway*. It needs the WebView2 runtime, which Windows 11
+  and up-to-date Windows 10 already have; without it the app opens in your browser
+  instead and says so.
 
 **Upgrade**: unzip the new version over the old folder. Your data is elsewhere (see
 `desktop/README.md` for the exact paths) and is upgraded on the next launch.
@@ -56,6 +54,28 @@ database location are the `QS_*` variables in `.env` (the comments in it explain
 
 **Upgrade**: `docker compose -f docker-compose.release.yml pull && docker compose -f
 docker-compose.release.yml up -d`. Migrations run on start.
+
+## Testing the QuadStick (the "Test it" page)
+
+The tester reads the QuadStick straight from the browser, so it has two needs
+whichever way you run the app:
+
+- **Chrome or Edge** on the computer the QuadStick is plugged into. Safari and Firefox
+  cannot read USB devices.
+- **A secure address.** Browsers only allow USB on `https://…` or on this computer's own
+  `localhost`.
+
+| You run | Open the tester |
+|---|---|
+| Desktop app | Press **Open the tester in your browser** on the Test it page. It opens the same app in your browser at a `localhost` address. If that browser is Safari or Firefox, copy the address into Chrome or Edge. |
+| Docker on this computer | <http://localhost:8324/tester> in Chrome or Edge. |
+| Docker on another machine, or a NAS | Its `https://` address. `docs/DEPLOY-NAS.md` → "HTTPS over Tailscale" sets one up in two commands. Over plain `http://` the page explains why it cannot connect. |
+
+The page gives you the small `qstest.csv` profile it needs, with the steps to copy it
+onto the QuadStick.
+
+Backing up the QuadStick's drive (the **QuadStick backup** box on the Profiles page)
+works in any browser and over plain `http://`.
 
 ## From source
 

@@ -8,7 +8,9 @@
 
 A self-hosted app for QuadStick game profiles: read them, check them against what the
 device will actually accept, convert between PlayStation and Xbox button names, and
-print a reference card. Runs as a desktop app, or on a NAS in Docker. Copying the
+print a reference card. It can also back up the QuadStick's flash drive, and test the
+device live: sip, puff or move the joystick and watch it light up on screen. Runs as a
+desktop app, or on a NAS in Docker. Copying the
 `.csv` onto the QuadStick's flash drive stays manual on purpose — the app walks you
 through it.
 
@@ -109,6 +111,46 @@ file on the device.
 
 ![The export checklist](docs/screenshots/11-export-checklist.webp)
 
+### Back up the QuadStick first
+
+Before you change anything on the QuadStick, save a copy of everything on it. Plug it
+in, press **Back up the QuadStick** on the Profiles page, and pick its drive. Every file
+is saved inside the app with the date and time.
+
+![The backup box on the Profiles page](docs/screenshots/14-backup.webp)
+
+If something goes wrong later, press **Restore a backup…**, pick the date, and save it as
+one `.zip`. Copy the files inside onto the QuadStick, unplug it, plug it back in, and it
+is back the way it was. The app tells you each step.
+
+![Restoring a backup](docs/screenshots/15-restore.webp)
+
+### Test your QuadStick
+
+Not sure if a tube is working, or if your sip counts as soft or hard? Open **Test it**.
+
+![The tester](docs/screenshots/13-tester.webp)
+
+- Every sip, puff, lip press and joystick move lights up on the photo the moment the
+  QuadStick sends it. Blue-green is a sip, orange is a puff, pale means soft.
+- The lights show which mode the QuadStick is in.
+- **Start the test** walks you through every tube, one at a time: "hard sip on the left
+  tube". A yellow ring shows where. Then it says ✓ or ✗, and what the QuadStick really
+  felt, so "asked for hard, got soft" is easy to spot. Missed? Just try again.
+- Good for practice too.
+
+What you need:
+
+- A small test profile, `qstest.csv`. The page gives it to you, with the steps to copy
+  it onto the QuadStick. Your other profiles keep their numbers.
+- **Chrome or Edge**, on the computer the QuadStick is plugged into. Other browsers
+  can't read USB devices.
+- In the desktop app, press **Open the tester in your browser**. On a NAS, open the app's
+  `https://` address (see "HTTPS over Tailscale" in `docs/DEPLOY-NAS.md`); a plain
+  `http://` address can't reach USB.
+
+The tester only listens. It never changes anything on the QuadStick.
+
 ### Printing
 
 Print to PDF from your browser, or onto paper. Everything is sized to stay readable
@@ -136,17 +178,6 @@ searchable, with the fiddly ones folded away and the right control for each. It 
 plainly which one wins: the device, then the profile, then the mode.
 
 ![Device settings](docs/screenshots/07-device-settings.webp)
-
-### Test your QuadStick
-
-Plug the QuadStick into the computer, open **Test it** in Chrome or Edge, and see
-every sip, puff, lip press and joystick move light up on the photo the moment the
-QuadStick reports it: blue-green for a sip, orange for a puff, pale for gentle. A
-guided test then asks for one input at a time ("hard sip, left tube"), rings the
-tube to use, and shows what the QuadStick actually registered, so "asked hard, got
-gentle + hard" is visible. It needs a small test profile, `qstest.csv`, which the
-page hands you. The browser reads the device directly (WebHID) and only listens.
-On a NAS this needs the HTTPS address; the desktop app opens it in your browser.
 
 ### Learn how it actually works
 

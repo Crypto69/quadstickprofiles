@@ -210,6 +210,10 @@ cd <vol>/quadstick
 ./deploy.sh --force      # deploy even if an export was just written
 ```
 
+Every deploy also downloads the newest base images (nginx stable, Node, Python)
+before it builds, so running `./deploy.sh` is also how the NAS picks up their
+security patches. Run it now and then even when nothing in the app changed.
+
 `deploy.sh` stamps both images with a readable deploy number and the commit
 it built. The number is shown top-right in the app's header and answers "did
 my deploy land?" without reading a commit hash:
@@ -245,8 +249,9 @@ walks through it after every export.
 
 ## Step 8 — Backups
 
-The database holds the profiles; fixtures and catalogs are re-seeded from the
-repo, so a backup is only the profile data. Dumps land in
+The database holds the profiles and the QuadStick drive backups made in the app
+(the **QuadStick backup** box); fixtures and catalogs are re-seeded from the repo,
+so a database backup is only your own data, and it covers both. Dumps land in
 `<vol>/quadstick/data/backups`. One line, verified to restore:
 
 ```bash
@@ -270,17 +275,21 @@ docker compose exec -T db sh -c 'gunzip -c /backups/quadstick-2026-09-12.sql.gz 
 Checked on a real dump: 6 profiles (3 of them starters) and 1215 mapping rows
 came back, including the per-mode preference override rows.
 
-## Step 9 — HTTPS over Tailscale (optional)
+## Step 9 — HTTPS over Tailscale (needed for the tester)
 
-If the NAS is on your tailnet, Tailscale can front the app with HTTPS without
-opening anything to the internet:
+The **Test it** page reads the QuadStick over USB from the browser, and browsers
+only allow that on an `https://` address. Over plain `http://<your-nas>:8324`
+everything else works, but the tester cannot connect. If the NAS is on your
+tailnet, Tailscale can front the app with HTTPS without opening anything to the
+internet:
 
 ```bash
 tailscale serve --bg --https=8444 http://127.0.0.1:8324
 tailscale serve status
 ```
 
-The app is then at `https://<your-nas>.<your-tailnet>.ts.net:8444`. Use a
+The app is then at `https://<your-nas>.<your-tailnet>.ts.net:8444` (the tester at
+`…:8444/tester`, in Chrome or Edge on a computer that is also on the tailnet). Use a
 port other than 443 if something else already serves it. The app has no
 login: anyone on your LAN or tailnet can use it, which is the intended scope.
 

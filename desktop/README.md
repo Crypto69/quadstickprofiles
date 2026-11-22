@@ -101,6 +101,11 @@ macOS first, then Windows. Delete nothing between steps unless it says so.
 8. Launch a second copy while one is running: a dialog says it is already running.
 9. Windows only: no console window appears; on a machine without WebView2 the app
    opens in the browser with a dialog explaining that.
+10. *Back up the QuadStick* opens a folder dialog; pick a folder holding a few `.csv`
+    files and the box says "Backed up N files". *Restore a backup…* → *Save the backup
+    (.zip)* writes the zip to `QuadStick exports` and reveals it.
+11. *Test it* → *Open the tester in your browser* opens `/tester` in the system browser.
+    In Chrome or Edge, with a QuadStick plugged in, *Connect the QuadStick* lists it.
 
 The automated part of this (`--headless`, curl `/`, `/api/version`, an export) is
 `scripts/desktop_check.sh`. `release.yml` runs it twice: once on the app as built,

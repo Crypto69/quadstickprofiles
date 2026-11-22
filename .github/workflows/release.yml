@@ -278,6 +278,18 @@ jobs:
           step, including ports, backups and updates: \`docs/DEPLOY-NAS.md\`.
 
           EOF_NOTES
+          # "What's new" goes first: this version's part of CHANGELOG.md, from its
+          # "## <version>" heading to the next "## ". Kept out of the heredoc above
+          # so its backticks stay Markdown rather than shell.
+          awk -v h="## $v" 'index($0, h " ") == 1 || $0 == h { on = 1; next }
+                            on && /^## / { exit }
+                            on' CHANGELOG.md > whatsnew.md
+          if grep -q '[^[:space:]]' whatsnew.md; then
+            { printf "## What's new in %s\n" "$v"; cat whatsnew.md; printf '\n'; cat notes.md; } > notes.tmp
+            mv notes.tmp notes.md
+          else
+            echo "::warning::CHANGELOG.md has no '## $v' section; the release says only how to run it"
+          fi
       - uses: softprops/action-gh-release@v2
         with:
           name: QuadStick Profile Studio ${{ needs.version.outputs.app_version }}
