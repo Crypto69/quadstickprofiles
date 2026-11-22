@@ -1,5 +1,8 @@
 # Build the SPA, then serve it from nginx with /api proxied to the api container.
-FROM node:22-alpine AS build
+# The SPA is plain files, the same on every CPU, so it is built once on the
+# builder's own platform: the release's arm64 image would otherwise run npm and
+# vite under QEMU emulation, which is slow and has hung a release build.
+FROM --platform=$BUILDPLATFORM node:22-alpine AS build
 WORKDIR /app
 COPY web/package.json web/package-lock.json ./
 RUN npm ci
