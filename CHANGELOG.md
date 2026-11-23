@@ -3,6 +3,37 @@
 Each release, in plain words. The newest is first. The part for a version is also
 shown at the top of its page on GitHub.
 
+## 1.16 — 23 November 2026
+
+### A new way to print: the control table
+
+Next to **Print detailed sheets** and **Print summary** there is now **Print control
+table**. It is one big table. Every control is down the side, like "Center sip" or
+"Chin switch". Every mode is across the top. To see what one control does in every
+mode, read along its line. It is handy for someone helping at the chair.
+
+- It prints sideways (landscape), up to six modes to a page.
+- Each box shows the button, what it does in the game, and your own note.
+- A dash means the control does nothing in that mode.
+- At the end, "What the words mean" explains words like *toggle* and *auto-fire*.
+
+The idea comes from QuadStick Config Manager's printed sheet.
+
+### More of your Google Sheet profiles open
+
+Before, one wrong word anywhere in a profile stopped the whole file from opening. Now
+the app only stops for a mistake the QuadStick would actually get wrong. For
+something the QuadStick just skips, like a word it does not know or a row with no
+button, the profile opens with a warning. The warning says what the QuadStick will do,
+so you can fix it in the editor.
+
+### Smaller things
+
+- A new mode starts with a way out: side tube sip goes to the next mode, side tube
+  puff to the one before.
+- The **On the QuadStick** list now leaves out `prefs.csv`, as the QuadStick does,
+  and shows the lights for up to 32 profiles.
+
 ## 1.13 — 23 November 2026
 
 ### Everything about the QuadStick on one page
