@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   backupZipName, filesFromDesktop, filesFromFolderPicker, isSystemPath, profilesOnDrive, sizeLabel,
+  skippedByTheSwitch,
 } from './driveFiles'
 
 function picked(relativePath: string, body = 'x'): File {
@@ -65,6 +66,21 @@ describe('driveFiles', () => {
 
     it('still numbers the profiles when there is no default.csv', () => {
       expect(profilesOnDrive(['b.csv', 'a.csv'])).toEqual(['a.csv', 'b.csv'])
+    })
+
+    it('sorts by plain byte order, as the firmware compares names', () => {
+      // digits before letters, one character at a time: 10 comes before 2, and "_"
+      // (after the capitals, before the small letters) before "a" once lowercased
+      expect(profilesOnDrive(['game2.csv', 'GAME10.csv', 'a.csv', '_X.csv', '1st.csv'])).toEqual([
+        '1st.csv', '_x.csv', 'a.csv', 'game10.csv', 'game2.csv',
+      ])
+    })
+
+    it('leaves out any name holding prefs.csv, as the firmware does, and can say which', () => {
+      const drive = ['default.csv', 'MyPrefs.csv', 'prefs.csv', 'old_prefs.csv', 'prefs2.csv']
+      expect(profilesOnDrive(drive)).toEqual(['default.csv', 'prefs2.csv'])
+      expect(skippedByTheSwitch(drive)).toEqual(['myprefs.csv', 'old_prefs.csv'])
+      expect(skippedByTheSwitch(['prefs.csv', 'cod.csv', 'sub/myprefs.csv'])).toEqual([])
     })
   })
 })

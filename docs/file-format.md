@@ -46,7 +46,9 @@ here; verifying it needs a real device file with an IR block as a fixture:
 | C4..J | input(s). C is the input; D–J hold extra inputs for sequences |
 | K.. | free-text comments (never reach the device; column K round-trips through `.xlsx`) |
 
-The first blank A cell ends the sheet: rows after it are ignored by the device.
+A row with nothing in A–J ends the sheet. A row whose A cell alone is empty (a
+mapping somebody switched off by clearing its output) is skipped and the rows below
+it are still read — see "What ends a block".
 
 An empty cell between two filled ones in C..J is closed up on import (the model
 stores a plain ordered list), so such a row re-exports shifted left. The order is
@@ -153,9 +155,22 @@ not a terminator, and any line between the empty line and the next `Profile` /
 `Preferences` / `Infrared` header is never read. `parse_csv` follows that: a
 skipped row is dropped with an info (a warning if its other cells were filled,
 since they are lost), and a line after the empty line is an **error** ("Line N
-comes after the empty line that ended mode M; the QuadStick ignores it"). The
-`.xlsx` path keeps the add-on's rule — the first blank A cell ends the sheet —
-because that is what the add-on and QMP do when they build the CSV.
+comes after the empty line that ended mode M; the QuadStick ignores it"). 
+
+An `.xlsx` is read the way the firmware would read the file it becomes (decided
+2026-11-23; it kept the add-on's rule until then). The add-on and QMP both `break` at
+the first row with an empty output cell and drop every row under it. The firmware is
+softer: it skips a row with an empty first field and stops only at an empty line. So:
+
+- a row with an empty A but something in B–J is a **parked row**. It is skipped with
+  a warning, and the rows under it are kept. The first such warning in a mode says
+  that the official add-on would have stopped there;
+- a row with nothing in A–J is the empty line. It ends the mode, and rows under it
+  are left out with one warning naming them.
+
+This is the one place an imported Google Sheet can export more rows than the add-on
+would have. `fixtures/synthetic_parked_rows.xlsx` pins both cases. The three real
+workbooks have neither, so their bytes are unchanged.
 Reserved filenames: `default.csv` (always file #1; a broken one can hide the
 flash drive until a hardware reset) and `prefs.csv` (global preferences).
 

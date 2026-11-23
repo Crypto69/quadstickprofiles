@@ -75,8 +75,12 @@ def test_ensure_output_survives_losing_the_race_for_a_new_keyword(db, monkeypatc
     db.commit()
     rows = db.scalars(select(M.OutputCatalog).where(M.OutputCatalog.name == "kb_numpad_9")).all()
     assert len(rows) == 1 and rows[0].grp == "keyboard"
-    with pytest.raises(ValueError):
-        ensure_output(db, "not_an_output")
+    # a word the firmware does not know is stored too, marked, so an imported file
+    # that carries one can be opened and fixed (and is never offered by /catalog)
+    ensure_output(db, "not_an_output")
+    db.commit()
+    rows = db.scalars(select(M.OutputCatalog).where(M.OutputCatalog.name == "not_an_output")).all()
+    assert len(rows) == 1 and rows[0].grp == "unknown"
 
 
 def test_two_profiles_introducing_the_same_keyboard_key_both_save(client):

@@ -4,7 +4,8 @@ or a device .csv into the model. Layout, from the manual and ddfortnite.xlsx:
   A1 'Profile Name' | C1 mode label      A2 filename (first sheet)  C2 'Normal'
   A3 header row                          C3 usb|bluetooth
   A4.. output | B function | C..J inputs | K.. comments
-  The first blank column-A cell ends the sheet.
+  A row with nothing in A..J ends the sheet; a row with only its output cell empty
+  is skipped (see parse_mode_rows).
 """
 import csv
 import io
@@ -89,8 +90,15 @@ def parse_mode_rows(rows, number, name, problems, console="playstation", source=
     `source` decides what a blank output cell means. In a device `.csv` the firmware
     skips a row with an empty first field and only ends the mode at an empty *line*
     (which `parse_csv` has already used to cut the block), so the row is dropped and
-    reported. In an `.xlsx` the add-on and QMP converters stop at the first blank A
-    cell and drop everything after it, so that stays the rule there.
+    reported.
+
+    An `.xlsx` is read the way the firmware reads the file it becomes (decided
+    2026-11-23). A row whose output cell is empty but whose other cells are not is a
+    parked row: people empty the output to switch a mapping off. The firmware skips
+    such a row and reads on, so this does too. The add-on and QMP converters stop at
+    it and drop every row below, so the first one per mode says that this app keeps
+    them. A row with nothing in A..J is the empty line that ends a mode on the device
+    and in both converters; rows under it are left out, reported once per mode.
     """
     def get(r, c):
         return rows[r][c] if r < len(rows) and c < len(rows[r]) else ""
@@ -99,22 +107,25 @@ def parse_mode_rows(rows, number, name, problems, console="playstation", source=
     if get(0, 10) and get(2, 10).lower() == "usb":
         problems.append(("info", number, 1, "Legacy 'Alternate' block in columns K–R is ignored "
                          "(the QuadStick reads columns K onward as comments)"))
-    ended_at = None
+    ended_at = None                      # xlsx: the first row with nothing in A..J
+    parked = []                          # xlsx: rows above it with an empty output cell
+    left_out = []                        # xlsx: rows below it that hold anything
     for i in range(3, len(rows)):
         out = get(i, 0)
+        filled = any(get(i, c) for c in range(1, KEYWORD_COLS))
+        if ended_at is not None:
+            if out or filled:
+                left_out.append(i + 1)
+            continue
         if not out:
             if source == "csv":
-                filled = any(get(i, c) for c in range(1, KEYWORD_COLS))
                 problems.append(("warning" if filled else "info", number, i + 1,
                                  f"Row {i+1} has no output; the QuadStick skips it"
                                  + (" (its other cells are lost)" if filled else "")))
-            elif ended_at is None:
+            elif filled:
+                parked.append(i + 1)
+            else:
                 ended_at = i + 1
-            continue
-        if ended_at is not None:
-            problems.append(("error", number, i + 1,
-                             f"Row {i+1} has content after the blank row {ended_at}; "
-                             "the QuadStick stops reading at the first blank output"))
             continue
         comment = " ".join(get(i, c) for c in range(10, len(rows[i])) if get(i, c))
         output = canonical_output(out, console)
@@ -144,6 +155,20 @@ def parse_mode_rows(rows, number, name, problems, console="playstation", source=
         inputs = [v for v in cells if v]
         m = Mapping(row=i + 1, output=output, function=fname, params=params, inputs=inputs, comment=comment)
         mode.mappings.append(m)          # a bad function cell is kept as-is; validate() reports it
+    for n, row in enumerate(parked):
+        kept = sum(1 for m in mode.mappings if m.row > row)
+        problems.append(("warning", number, row,
+                         f"Row {row} has no output; the QuadStick skips it (its other cells are lost)"
+                         + (f". The official add-on stops reading the sheet at this row; this app keeps "
+                            f"the {kept} row{'' if kept == 1 else 's'} below it, as the QuadStick itself "
+                            "reads them" if n == 0 and kept else "")))
+    if left_out:
+        rows_said = (f"Row {left_out[0]}" if len(left_out) == 1
+                     else f"Rows {left_out[0]} to {left_out[-1]} ({len(left_out)} rows)")
+        problems.append(("warning", number, left_out[0],
+                         f"{rows_said} under the empty row {ended_at} "
+                         f"{'is' if len(left_out) == 1 else 'are'} left out; the QuadStick and the "
+                         "add-on both stop reading a mode at an empty row"))
     return mode
 
 
@@ -165,8 +190,12 @@ def parse_xlsx(path):
                 continue
             kind = sheet_type(a1)
             if kind is None:
-                problems.append(("error", None, 1,
-                                 f"Sheet '{ws.title}' cell A1 is '{a1}'; it must be one of "
+                # Left out, not a fault in the profile: the firmware only loads a block
+                # whose first line starts with one of the three words, so a notes tab
+                # never reaches the device by any route.
+                problems.append(("warning", None, 1,
+                                 f"Sheet '{ws.title}' is left out: cell A1 is '{a1}', and the "
+                                 "QuadStick only reads a sheet whose A1 is one of "
                                  + ", ".join(sorted(SHEET_TYPES))))
                 continue
             if a1 != kind:

@@ -295,6 +295,34 @@ export function ledsFor(modeNumber: number): LedPattern {
   return leds
 }
 
+/** The profile switch (long hard sip, then the joystick) stops at this many files. */
+export const MAX_SELECTABLE_FILES = 32
+
+const P: LedColour = 'purple'
+const B: LedColour = 'blue'
+const R: LedColour = 'red'
+const O: LedColour = 'off'
+// Files 17 to 32. There is no rule to infer here, so it is a table: the one in
+// QuadStick Manager Program, as audited and copied out by QuadStick Config Manager
+// (`Device.cs`, MIT, Copyright (c) 2025 Brizly). Not yet seen on the owner's device.
+const FILE_LEDS_17_TO_32: LedPattern[] = [
+  [O, P, O, O, R], [O, O, P, O, R], [O, O, O, P, R], [B, B, B, B, B],
+  [P, B, B, B, B], [B, P, B, B, B], [B, B, P, B, B], [B, B, B, P, B],
+  [B, B, B, B, P], [P, B, B, B, P], [B, P, B, B, P], [B, B, P, B, P],
+  [B, B, B, P, P], [R, R, R, R, P], [P, R, R, R, R], [R, P, R, R, R],
+]
+
+/**
+ * The lights for file `n` on the profile switch. Files 1 to 16 light exactly as
+ * modes 1 to 16 do (`ledsFor`); the switch then carries on to 32, which modes never
+ * reach. Past 32 the device lists no more files, and every LED is reported off.
+ */
+export function fileLedsFor(fileNumber: number): LedPattern {
+  const n = Math.trunc(fileNumber)
+  if (n >= 17 && n <= MAX_SELECTABLE_FILES) return [...FILE_LEDS_17_TO_32[n - 17]!] as LedPattern
+  return ledsFor(n)
+}
+
 /**
  * The pattern in words — "LED 5 blue", "LED 2 purple and LED 5 blue" — for people who
  * cannot tell the colours apart on screen, and for the caption under the photo.

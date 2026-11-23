@@ -112,23 +112,76 @@ def test_skipped_rows_are_not_written_back(tmp_path):
         b"Preferences,\r\n,,,,\r\nPreference,Value,Units,Description,\r\n\r\n")
 
 
-def test_xlsx_still_stops_at_the_first_blank_output(tmp_path):
-    """The add-on and QMP converters end a sheet at the first blank A cell."""
+def _blank_sheet(tmp_path, rows):
     wb = Workbook()
     ws = wb.active
     ws.title = "Left joy"
     ws["A1"], ws["C1"] = "Profile Name", "Left joy"
     ws["A2"], ws["C2"] = "blank.csv", "Normal"
     ws["A3"], ws["B3"], ws["C3"] = "Output or Function", "Function", "usb"
-    ws.append(["increment_mode", "normal", "right_sip"])
-    ws.append([None, None, None])
-    ws.append(["cross", "normal", "lip"])
+    for r in rows:
+        ws.append(r)
     p = tmp_path / "blank.xlsx"
     wb.save(p)
+    return p
+
+
+def test_xlsx_stops_at_an_empty_row_and_says_so_once(tmp_path):
+    """A row with nothing in A..J is the empty line that ends a mode, on the device
+    and in both converters. What sits under it is left out: one warning for the lot,
+    not one per row, and nothing that blocks export."""
+    p = _blank_sheet(tmp_path, [["increment_mode", "normal", "right_sip"],
+                                [None, None, None],
+                                ["cross", "normal", "lip"],
+                                ["circle", "normal", "mp_left_sip"]])
     cfg, problems = load(str(p))
     assert [m.output for m in cfg.modes[0].mappings] == ["increment_mode"]
-    errs = [x for x in problems if x[0] == "error"]
-    assert errs and "after the blank row" in errs[0][3]
+    assert not [x for x in problems if x[0] == "error"], problems
+    said = [x for x in problems if "left out" in x[3]]
+    assert len(said) == 1 and said[0][:3] == ("warning", 1, 6)
+    assert "Rows 6 to 7 (2 rows) under the empty row 5" in said[0][3]
+
+
+def test_xlsx_skips_a_parked_row_and_keeps_the_rows_below_it(tmp_path):
+    """Emptying the output cell is how people switch a mapping off. The firmware skips
+    such a row and reads on; the add-on stops at it and drops the rest. This app reads
+    the sheet as the firmware would read the file, and says where the two differ."""
+    p = _blank_sheet(tmp_path, [["increment_mode", "normal", "right_sip"],
+                                [None, "delay_on 500", "mp_center_sip"],
+                                ["cross", "normal", "lip"],
+                                [None, "normal", "mp_left_puff"],
+                                ["circle", "normal", "mp_left_sip"]])
+    cfg, problems = load(str(p))
+    assert [(m.row, m.output) for m in cfg.modes[0].mappings] == [
+        (4, "increment_mode"), (6, "cross"), (8, "circle")]
+    assert not [x for x in problems if x[0] == "error"], problems
+    first, second = [x for x in problems if "has no output" in x[3]]
+    assert first[:3] == ("warning", 1, 5) and "keeps the 2 rows below it" in first[3]
+    assert "add-on stops reading" in first[3]
+    assert second[:3] == ("warning", 1, 7) and "add-on" not in second[3]
+
+
+def test_the_parked_rows_fixture_reads_as_the_firmware_would(tmp_path):
+    """fixtures/synthetic_parked_rows.xlsx: mode 1 of cod.csv with row 14's output
+    emptied and two spare rows under an empty row. Everything but the parked row is
+    kept, the spare rows are left out, and the export is cod.csv's mode minus that row."""
+    from qsprofile import validate
+    fx = pathlib.Path(__file__).parent.parent / "fixtures"
+    cfg, problems = load(str(fx / "synthetic_parked_rows.xlsx"))
+    real, _ = load(str(fx / "cod.csv"))
+    want = [(m.output, m.function, m.params, m.inputs) for m in real.modes[0].mappings if m.row != 14]
+    assert [(m.output, m.function, m.params, m.inputs) for m in cfg.modes[0].mappings] == want
+    assert len(cfg.modes[1].mappings) == len(real.modes[1].mappings)
+    findings = validate(cfg, problems)
+    assert not [x for x in findings if x[0] == "error"], findings
+    assert [x for x in findings if x[:3] == ("warning", 1, 14) and "keeps the 21 rows below it" in x[3]]
+    assert [x for x in findings if x[:3] == ("warning", 1, 37)
+            and "Rows 37 to 38 (2 rows) under the empty row 36" in x[3]]
+    out = tmp_path / "parked.csv"
+    write_csv(cfg, str(out))
+    lines = out.read_bytes().split(b"\r\n")
+    assert b"left_joy_left,normal,left," not in lines[:36]      # the parked row is gone
+    assert b"left_joy_right,normal,right," in lines
 
 
 @pytest.mark.parametrize("name", ["ddfortnite.csv", "cod.csv", "synthetic_pref_override.csv"])
@@ -248,7 +301,7 @@ def test_an_output_keyword_is_a_mapping_before_it_is_a_preference_key(tmp_path):
     write_csv(cfg, str(out))
     assert out.read_bytes() == HEAD + body
     f = validate(cfg, problems)
-    assert [x for x in f if x[0] == "error" and x[2] == 4 and "Unknown input '1'" in x[3]]
+    assert [x for x in f if x[0] == "warning" and x[2] == 4 and "unknown input '1'" in x[3]]
     assert not [x for x in f if "for this mode only" in x[3] or "ignores this here" in x[3]]
 
 
@@ -266,7 +319,7 @@ def test_every_relay_row_is_a_mapping_and_round_trips(tmp_path, n):
     assert out.read_bytes() == HEAD + body
 
 
-def test_override_row_keeps_a_filled_column_b_and_warns(tmp_path):
+def test_override_row_keeps_a_filled_column_b_and_says_so(tmp_path):
     """The device ignores column B on a preference row and reads the value from C, so
     `mouse_speed,normal,120,` is an override of 120 there. B is kept for byte identity."""
     from qsprofile import validate, write_xlsx
@@ -280,7 +333,7 @@ def test_override_row_keeps_a_filled_column_b_and_warns(tmp_path):
     assert out.read_bytes() == HEAD + body
     f = validate(cfg, problems)
     assert not [x for x in f if x[0] == "error"], f          # not an unknown output any more
-    assert [x for x in f if x[0] == "warning" and x[2] == 4 and "column B 'normal'" in x[3]
+    assert [x for x in f if x[0] == "info" and x[2] == 4 and "column B 'normal'" in x[3]
             and "reads the value from column C" in x[3]]
     xlsx = tmp_path / "out.xlsx"
     write_xlsx(cfg, str(xlsx))

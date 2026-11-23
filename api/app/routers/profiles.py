@@ -16,8 +16,9 @@ from qsprofile.catalog import check_csv_filename
 from qsprofile.validate import budget as core_budget
 from .. import models as M, schemas as S
 from ..bridge import (profile_from_config, config_from_profile, device_label,
-                      actions_for_profile, findings_for_profile, has_errors, ensure_output,
-                      ROW_OFFSET)
+                      actions_for_profile, findings_for_profile, has_errors,
+                      ensure_output, ensure_input, ensure_function,
+                      known_output, known_input, known_function, ROW_OFFSET)
 from ..db import get_session
 from ..headers import export_path_header
 from ..settings import settings
@@ -130,8 +131,15 @@ def _modes_from_body(db: Session | None, modes: list[S.ModeIn]) -> list[M.Mode]:
     two callers — the save (PUT, POST) and the live check (POST /profiles/validate) —
     so what the editor is told about a document is what saving it would store.
     `db` is None on the live path: nothing is looked up and nothing is persisted.
-    The keyword rules are already applied by the schema (MappingIn), including the
-    8-input cap and the preference-key check."""
+    The schema (MappingIn) has applied the 8-input cap and the preference-key check.
+    The keyword rule is applied here, on the save path only: a word core does not
+    know is kept when a file already brought it in (it has a catalog row, see
+    bridge.UNKNOWN) and refused otherwise, so a save can carry an imported typo but
+    can never mint a new one."""
+    def stored_or_422(model, word, what):
+        if db.get(model, word) is None:
+            raise HTTPException(422, f"Unknown {what} '{word[:40]}'; pick one from the list")
+
     out = []
     for pos, mode in enumerate(modes, start=1):
         # C1 is the mode's name (see bridge.device_label), whatever label the body sent.
@@ -146,8 +154,16 @@ def _modes_from_body(db: Session | None, modes: list[S.ModeIn]) -> list[M.Mode]:
                                             value=mp.value, function=None, column_b=mp.function or None,
                                             params=[], comment=mp.comment))
                 continue
-            if db is not None:        # an output the seed does not hold yet (kb_* / ir_*)
-                ensure_output(db, mp.output)
+            if db is not None:
+                if known_output(mp.output):       # one the seed does not hold yet (kb_* / ir_*)
+                    ensure_output(db, mp.output)
+                else:
+                    stored_or_422(M.OutputCatalog, mp.output, "output")
+                if mp.function and not known_function(mp.function):
+                    stored_or_422(M.FunctionCatalog, mp.function, "output function")
+                for inp in mp.inputs:
+                    if not known_input(inp):
+                        stored_or_422(M.InputCatalog, inp, "input")
             row = M.Mapping(row_order=i, kind="mapping", output=mp.output, function=mp.function or None,
                             params=list(mp.params), comment=mp.comment)
             row.inputs = [M.MappingInput(seq=s, input=inp) for s, inp in enumerate(mp.inputs)]
@@ -289,6 +305,15 @@ async def import_profile(file: UploadFile = File(...), game: str | None = Form(N
         raise HTTPException(422, f"name: '{name[:30]}' {problem}")
     if name:
         cfg.name = name
+    # a filename the QuadStick cannot load (a space, no .csv, nothing in A2) is put
+    # right here and reported, like the whitespace the parser trims: the profile comes
+    # in under a name that works instead of being turned away for its name
+    if problem := check_csv_filename(cfg.filename):
+        was = cfg.filename
+        cfg.filename = C.csv_filename_for_name(Path(was).stem if was else cfg.name)
+        problems.append(("warning", None, 2,
+                         (f"A2 is '{was}': {problem}. " if was else "A2 holds no filename. ")
+                         + f"Saved here as {cfg.filename}; change it in the editor if you want another name"))
     # a mode is called what its tab is called, and that is what the export writes in C1
     # (bridge.device_label). A sheet whose C1 says something else is told so, once, and
     # the findings below then describe the profile as it is stored.
@@ -312,7 +337,7 @@ async def import_profile(file: UploadFile = File(...), game: str | None = Form(N
         refuse("; ".join(reasons))
     try:
         p = profile_from_config(db, cfg, game=game, firmware=firmware)
-    except ValueError as e:                      # unknown output / input / function / preference
+    except ValueError as e:                      # a preference key the catalog does not hold
         refuse(str(e))
     db.add(p)
     try:
@@ -324,21 +349,15 @@ async def import_profile(file: UploadFile = File(...), game: str | None = Form(N
 
 def _unstorable(cfg) -> list[str]:
     """Why the database could not hold this Config: an Infrared block the data model
-    has no shape for, more modes than the position CHECK allows, a mapping whose
-    function is not in function_catalog (FK), or a filename the profiles CHECK
-    rejects. Each is also a core finding."""
+    has no shape for, or more modes than the position CHECK allows. Each is also a
+    core finding. A word the firmware does not know is not on this list: it is stored
+    (bridge.UNKNOWN) and reported, so it can be fixed in the editor."""
     out = []
     if cfg.infrared_blocks:
         out.append(f"the file contains {cfg.infrared_blocks} Infrared block(s), which this "
                    "tool cannot store; importing it would re-export them as profile modes")
     if len(cfg.modes) > C.MAX_MODES:
         out.append(f"{len(cfg.modes)} modes; the QuadStick allows at most {C.MAX_MODES}")
-    if problem := check_csv_filename(cfg.filename):
-        out.append(f"A2 must be the profile's filename: {problem}")
-    for mode in cfg.modes:
-        for m in mode.mappings:
-            if m.kind != "preference" and m.function and m.function not in C.FUNCTIONS:
-                out.append(f"mode {mode.number} row {m.row}: unknown output function '{m.function}'")
     return out
 
 

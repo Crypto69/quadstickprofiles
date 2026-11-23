@@ -293,10 +293,14 @@ def test_stateless_validate_reports_a_bad_filename_and_blank_name_as_findings(cl
     assert r.status_code == 200, r.text
     assert any("at most 16" in f["message"] for f in r.json()["findings"])
     assert r.json()["budget"]["modes_used"] == 17
-    # the same document cannot be saved, and the editor must not lose the row keywords rule
+    # the same document cannot be saved; a row keyword core does not know is a
+    # finding against the row here (an imported typo has to be checkable to be fixed)
     assert client.post("/profiles", json={"name": "D", "csv_filename": "bad name.csv"}).status_code == 422
-    assert client.post("/profiles/validate", json={"name": "D", "csv_filename": "ok.csv", "modes": [
-        {"name": "M", "mappings": [{"output": "fire", "inputs": ["lip"]}]}]}).status_code == 422
+    r = client.post("/profiles/validate", json={"name": "D", "csv_filename": "ok.csv", "modes": [
+        {"name": "M", "mappings": [{"output": "fire", "inputs": ["lip"]}]}]})
+    assert r.status_code == 200, r.text
+    assert any(f["severity"] == "warning" and f["row"] == 4 and "unknown output 'fire'" in f["message"]
+               for f in r.json()["findings"])
     assert client.post("/profiles/validate", json={"name": "D", "csv_filename": "ok.csv",
                                                    "firmware": 9999}).status_code == 422
 

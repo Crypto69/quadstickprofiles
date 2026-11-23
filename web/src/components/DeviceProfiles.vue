@@ -1,20 +1,18 @@
 <script setup lang="ts">
 // What is on the QuadStick: each profile with its file number and the status lights
-// that pick it (long hard sip, joystick until the lights match, lip). The numbers come
-// from the same LED table as the modes, the editor and the printed card (`ledsFor`),
-// because the device uses one table for both.
+// that pick it (long hard sip, joystick until the lights match, lip). Files 1 to 16
+// light like modes 1 to 16, from the table the editor and the printed card use; the
+// profile switch then carries on to file 32 (`fileLedsFor`).
 //
 // The desktop app reads the drive itself, live, every few seconds. A browser cannot,
 // so there — and in the desktop app while the QuadStick is unplugged — the list is
 // what the newest backup holds, and says so.
 import { computed, onMounted, onUnmounted, ref } from 'vue'
-import { ledSentence, ledsFor } from '@/device/layout'
-import { backupWhen, profilesOnDrive } from '@/lib/driveFiles'
+import { MAX_SELECTABLE_FILES, fileLedsFor, ledSentence } from '@/device/layout'
+import { backupWhen, profilesOnDrive, skippedByTheSwitch } from '@/lib/driveFiles'
 import { useBackupsStore } from '@/stores/backups'
 import { shellMessage, useDriveStore } from '@/stores/drive'
 
-/** The QuadStick's lights only count this far. */
-const LAST_LIT = 16
 /** How often the desktop app looks at the drive again. */
 const LOOK_EVERY_MS = 3000
 
@@ -51,10 +49,12 @@ async function chooseDrive() {
 const rows = computed(() =>
   profilesOnDrive(paths.value).map((name, i) => {
     const n = i + 1
-    const leds = ledsFor(n)
-    return { n, name, leds, words: n <= LAST_LIT ? ledSentence(leds) : 'no light pattern' }
+    const leds = fileLedsFor(n)
+    const reachable = n <= MAX_SELECTABLE_FILES
+    return { n, name, leds, reachable, words: reachable ? ledSentence(leds) : 'the QuadStick cannot pick this file' }
   }),
 )
+const skipped = computed(() => skippedByTheSwitch(paths.value))
 </script>
 
 <template>
@@ -129,12 +129,20 @@ const rows = computed(() =>
                 />
                 <span class="sr-only">{{ r.words }}</span>
               </span>
-              <small v-if="r.n > LAST_LIT" class="past">past {{ LAST_LIT }}: no lights</small>
+              <small v-if="!r.reachable" class="past">
+                past {{ MAX_SELECTABLE_FILES }}: the QuadStick cannot pick it
+              </small>
             </td>
             <td class="mono name">{{ r.name }}</td>
           </tr>
         </tbody>
       </table>
+
+      <p v-if="skipped.length" class="hint skipped">
+        Not on the list: <span class="mono">{{ skipped.join(', ') }}</span>. The QuadStick
+        leaves out any file with <span class="mono">prefs.csv</span> in its name, so it can
+        never be picked. Rename it to use it as a profile.
+      </p>
     </template>
   </section>
 </template>
@@ -234,5 +242,8 @@ const rows = computed(() =>
 .past {
   display: block;
   color: var(--ink-soft);
+}
+.on-device p.skipped {
+  margin-top: var(--sp-3);
 }
 </style>

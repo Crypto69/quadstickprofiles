@@ -108,8 +108,12 @@ def validate(cfg, problems=None, firmware=None):
         problem = unsafe_text(mode.label)
         if problem:
             err(n, 1, f"The mode label (C1) '{mode.label[:30]}' {problem}")
-        if len(mode.mappings) > MAX_ROWS_PER_MODE:
-            err(n, None, f"This mode ({mode.name}) has {len(mode.mappings)} rows; the firmware reads at most "
+        # Only a row the firmware accepts takes one of its 128 slots: its loop skips a
+        # row whose output matches neither an output nor a preference name before it
+        # counts, so a misspelled output costs nothing.
+        slots = sum(1 for m in mode.mappings if m.kind == "preference" or output_label(m.output) is not None)
+        if slots > MAX_ROWS_PER_MODE:
+            err(n, None, f"This mode ({mode.name}) has {slots} rows; the firmware reads at most "
                          f"{MAX_ROWS_PER_MODE} per mode")
         by_input = defaultdict(list)       # input -> [(output, row)]
         seen_pairs = defaultdict(list)     # (input, output) -> rows
@@ -138,27 +142,41 @@ def validate(cfg, problems=None, firmware=None):
                 info(n, m.row, f"Row {m.row} sets {m.output} = {m.value} for this mode only{what}. "
                                "Per-mode preference overrides are documented but not yet verified on a device")
                 if m.function:
-                    warn(n, m.row, f"Row {m.row}: column B '{m.function}' does nothing on a preference row; "
+                    info(n, m.row, f"Row {m.row}: column B '{m.function}' does nothing on a preference row; "
                                    f"the QuadStick ignores it and reads the value from column C ('{m.value}')")
                 for sev, _, _, msg in validate_preferences({m.output: m.value}, fw, "mode"):
                     out.append((sev, n, m.row, f"Row {m.row}: {msg}"))
                 overrides[m.output] = (m.value, m.row)
                 continue
+            # A word the firmware does not know is skipped by it, not misread, so these
+            # three are warnings (decided 2026-11-23): the file still loads and the row
+            # just does less than it says. Errors stay for what the device misreads.
             if output_label(m.output) is None:
-                err(n, m.row, f"Unknown output '{m.output}'")
+                warn(n, m.row, f"Row {m.row}: unknown output '{m.output}'; the QuadStick skips the whole row")
             if not m.function:
                 info(n, m.row, f"Row {m.row} has no function; the QuadStick treats it as normal")
+            elif m.function not in FUNCTIONS:
+                warn(n, m.row, f"Row {m.row}: unknown output function '{m.function}'; the QuadStick "
+                               "reads the cell as normal")
             else:
                 for e in function_errors(m.function, m.params):
                     err(n, m.row, f"Row {m.row}: {e}")
+            # the firmware drops an input cell it does not know and closes the row up,
+            # so say what is left of the row, not only which cell is wrong
+            left = [i for i in m.inputs if classify_input(i) is not None]
+            so = (f"so {m.output} fires on {' then '.join(left)} alone" if left
+                  else f"so {m.output} never fires")
             for ix, inp in enumerate(m.inputs):
                 c = classify_input(inp)
                 if c is None:
-                    col = COLS[ix]
+                    col = COLS[ix] if ix < len(COLS) else "?"
                     if " " in inp or len(inp) > 24:
-                        err(n, m.row, f"Column {col} looks like a comment ('{inp[:30]}…') but is read as an input; move comments to column K or later")
+                        warn(n, m.row, f"Row {m.row}: column {col} looks like a comment ('{inp[:30]}…') but is "
+                                       f"read as an input; the QuadStick skips the cell, {so}. Move comments "
+                                       "to column K or later")
                     else:
-                        err(n, m.row, f"Unknown input '{inp}' in column {col}")
+                        warn(n, m.row, f"Row {m.row}: unknown input '{inp}' in column {col}; the QuadStick "
+                                       f"skips the cell, {so}")
                 elif c["kind"] == "legacy":
                     warn(n, m.row, f"'{inp}' is an older input name ({LEGACY_INPUTS[inp]}); firmware 2373 still accepts it")
             if m.is_sequence():
@@ -324,13 +342,18 @@ def validate_preferences(prefs, firmware=None, scope="profile"):
             if n is None:
                 err(f"{label} ({key}) must be a whole number, got '{value}'")
                 continue
+            # The ranges are the ones QuadStick's own tools offer (QMP's sliders), not a
+            # limit the firmware enforces: it reads the number with atoi and uses it.
+            # Profiles in the wild carry values outside them (mouse_speed 550), so this
+            # is a warning (decided 2026-11-23). The pairs the firmware divides by are
+            # THRESHOLD_ORDER below, and those stay errors.
             lo, hi = meta.get("minimum"), meta.get("maximum")
             if editor == "toggle":
                 lo, hi = 0, 1
-            if lo is not None and n < lo:
-                err(f"{label} ({key}) is {n}; the lowest the QuadStick accepts is {lo}")
-            if hi is not None and n > hi:
-                err(f"{label} ({key}) is {n}; the highest the QuadStick accepts is {hi}")
+            usual = "it is either 0 or 1" if editor == "toggle" else f"the usual range is {lo} to {hi}"
+            if (lo is not None and n < lo) or (hi is not None and n > hi):
+                warn(f"{label} ({key}) is {n}; {usual}. The QuadStick uses the number as written, "
+                     "so check it does what you want")
         elif editor == "choice":
             options = meta.get("options") or []
             numeric = all(o.lstrip("-").isdigit() for o in options)

@@ -10,7 +10,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 from qsprofile import load
 from . import models as M
-from .bridge import profile_from_config
+from .bridge import profile_from_config, prune_unknown_words
 from .catalog_seed import input_rows, output_rows, function_rows
 from .db import SessionLocal
 from .settings import settings
@@ -46,8 +46,10 @@ def _upsert(db: Session, model, rows):
     container start and every desktop launch). Existing rows still have their fields
     refreshed from the catalog, so a renamed label reaches an already-seeded database;
     only fields that actually differ are written, so unchanged rows stay clean.
-    Rows this seed does not know about (ensure_output's kb_* / ir_*) are left alone."""
+    Rows this seed does not know about (ensure_output's kb_* / ir_*, and the words
+    from imported files that bridge.prune_unknown_words looks after) are left alone."""
     existing = {o.name: o for o in db.scalars(select(model))}
+    stored = list(existing.values())
     new = []
     for r in rows:
         obj = existing.get(r["name"])
@@ -58,12 +60,14 @@ def _upsert(db: Session, model, rows):
                 if getattr(obj, k) != v:
                     setattr(obj, k, v)
     db.add_all(new)
+    return stored
 
 
 def seed_catalogs(db: Session):
-    _upsert(db, M.InputCatalog, input_rows())
-    _upsert(db, M.OutputCatalog, output_rows())
-    _upsert(db, M.FunctionCatalog, function_rows())
+    inputs = _upsert(db, M.InputCatalog, input_rows())
+    outputs = _upsert(db, M.OutputCatalog, output_rows())
+    functions = _upsert(db, M.FunctionCatalog, function_rows())
+    prune_unknown_words(db, inputs, outputs, functions)
     db.commit()
 
 

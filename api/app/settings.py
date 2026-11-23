@@ -25,11 +25,13 @@ class Settings(BaseSettings):
     # The built web app (web/dist). Set only by the desktop build: this process then
     # serves the SPA itself (app/spa.py). On the NAS nginx does it and this stays None.
     static_dir: Path | None = None
-    # Biggest upload an import will read (QS_MAX_UPLOAD_BYTES). A real profile is
-    # a few KB; the largest .xlsx fixture is ~61 KB, so 2 MB is ~30x headroom.
+    # Biggest upload an import will read (QS_MAX_UPLOAD_BYTES). A device .csv is a few
+    # KB and the largest .xlsx fixture ~61 KB, but a Google Sheet somebody pasted
+    # screenshots into downloads as several MB: of 131 community workbooks tried on
+    # 2026-11-23, four were over the old 2 MB cap and the largest was 6.4 MB.
     # nginx caps /api/ at the same size, but the API is also published unproxied
     # (docker-compose 8325) and the desktop build has no proxy at all.
-    max_upload_bytes: int = 2 * 1024 * 1024
+    max_upload_bytes: int = 8 * 1024 * 1024
     # Biggest whole-drive backup (QS_MAX_BACKUP_BYTES). Each file is still capped at
     # max_upload_bytes; the drive holds .csv profiles and joystick.bin (the firmware
     # deletes everything else at boot), so 20 MB is far more than a full stick.

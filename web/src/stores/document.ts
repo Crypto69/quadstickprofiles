@@ -322,10 +322,19 @@ export const useDocumentStore = defineStore('document', () => {
     selectedModeKey.value = key
   }
 
+  /**
+   * A new mode starts with a way out: the two side-tube rows the QuadStick's own
+   * factory profile opens every mode with. An empty mode is a trap, because the
+   * side tube only changes mode where a row says so, and whoever lands in a mode
+   * with no such row stays there until the device is unplugged. The rows are
+   * ordinary ones: they can be changed or deleted like any other.
+   */
   function addMode(name: string, max: number) {
     if (!doc.value || doc.value.modes.length >= max) return null
     const mode: EditMode = { key: nextKey('m'), name, label: name, channel: 'usb', mappings: [] }
     doc.value.modes.push(mode)
+    addMapping(mode.key, { output: 'increment_mode', inputs: ['right_sip'] })
+    addMapping(mode.key, { output: 'decrement_mode', inputs: ['right_puff'] })
     selectedModeKey.value = mode.key
     return mode
   }

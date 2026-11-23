@@ -18,17 +18,20 @@ def test_put_replaces_rather_than_merges(client):
     assert client.get("/prefs").json()["preferences"] == {"volume": "10"}
 
 
-def test_a_value_outside_the_firmware_range_is_refused(client):
+def test_a_value_outside_the_usual_range_is_saved_with_a_warning(client):
+    """The ranges are the ones QuadStick's own tools offer; the firmware uses the
+    number as written, and real files carry values outside them. A prefs.csv with one
+    must stay saveable after import, so this warns instead of refusing."""
     meta = C.PREFERENCES["volume"]
     too_high = str((meta["maximum"] or 100) + 1)
     r = client.put("/prefs", json={"preferences": {"volume": too_high}})
-    assert r.status_code == 422
-    detail = r.json()["detail"]
-    assert "outside what the QuadStick accepts" in detail["message"]
-    assert any("the highest the QuadStick accepts" in f["message"]
-               for f in detail["validation"]["findings"])
-    # and nothing was stored
-    assert client.get("/prefs").json()["preferences"] == {}
+    assert r.status_code == 200, r.text
+    got = r.json()
+    assert got["preferences"] == {"volume": too_high}
+    assert got["validation"]["errors"] == 0
+    assert any(f["severity"] == "warning" and "the usual range is" in f["message"]
+               for f in got["validation"]["findings"])
+    assert client.get("/prefs/export.csv").status_code == 200
 
 
 def test_a_non_numeric_value_is_refused_with_the_setting_named(client):
@@ -47,10 +50,14 @@ def test_a_choice_outside_its_options_is_refused(client):
                for f in r.json()["detail"]["validation"]["findings"])
 
 
-def test_a_toggle_only_takes_0_or_1(client):
+def test_a_toggle_other_than_0_or_1_is_warned_about(client):
     key = next(k for k, v in C.PREFERENCES.items() if v["editor"] == "toggle")
-    assert client.put("/prefs", json={"preferences": {key: "1"}}).status_code == 200
-    assert client.put("/prefs", json={"preferences": {key: "2"}}).status_code == 422
+    r = client.put("/prefs", json={"preferences": {key: "1"}})
+    assert r.status_code == 200 and r.json()["validation"]["warnings"] == 0
+    r = client.put("/prefs", json={"preferences": {key: "2"}})
+    assert r.status_code == 200
+    assert any("it is either 0 or 1" in f["message"] for f in r.json()["validation"]["findings"])
+    assert client.put("/prefs", json={"preferences": {key: "on"}}).status_code == 422
 
 
 def test_an_unknown_key_is_kept_and_reported_once_at_import(client, tmp_path):

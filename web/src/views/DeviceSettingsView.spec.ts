@@ -128,7 +128,7 @@ describe('DeviceSettingsView', () => {
     const refusal = validation({
       errors: 1,
       findings: [
-        { severity: 'error', mode: null, row: null, message: 'Speaker volume (volume) is 900; the highest the QuadStick accepts is 100' },
+        { severity: 'error', mode: null, row: null, message: "Speaker volume (volume) must be a whole number, got 'loud'" },
       ],
     })
     const w = await page({
@@ -144,7 +144,7 @@ describe('DeviceSettingsView', () => {
     await save.trigger('click')
     await settle()
     expect(w.text()).toContain('were not saved')
-    expect(w.text()).toContain('the highest the QuadStick accepts')
+    expect(w.text()).toContain('must be a whole number')
     expect(w.find<HTMLInputElement>('#pref-volume').element.value).toBe('900')
   })
 

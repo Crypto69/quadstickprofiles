@@ -336,31 +336,87 @@ def test_import_keeps_a_bad_function_cell_and_blocks_export(client, tmp_path):
     assert r.json()["detail"]["validation"]["errors"] >= 1
 
 
-def test_unknown_function_name_is_refused_on_import(client, tmp_path):
-    """`mappings.function` is a foreign key to function_catalog, so an unknown name
-    has nowhere to go; the file's own error comes back with the refusal."""
-    rows = ("increment_mode,normal,right_sip,", "x,hold 5,lip,", "left_joy_up,normal,up,")
-    r = _post(client, _csv(tmp_path, "m.csv", _mode_block(1, rows=rows)))
-    assert r.status_code == 422, r.text
-    detail = r.json()["detail"]
-    assert "hold" in detail["message"]
-    assert detail["validation"]["errors"] >= 1
-    assert client.get("/profiles").json() == []
-
-
-def test_a_bad_a2_filename_is_refused_on_import_with_the_rule_1_error(client, tmp_path):
-    """The profiles table has a CHECK on csv_filename (on Postgres); the API applies the
-    same rule everywhere so SQLite and Postgres behave alike."""
-    text = ("QuadStick Configuration,Version 1.4,,T\r\nProfile Name,,M,\r\n../evil.csv,,Normal,\r\n"
-            "Output or Function,Function,usb,\r\nincrement_mode,normal,right_sip,\r\n\r\n"
-            "Preferences,\r\n,,,,\r\nPreference,Value,Units,Description,\r\n\r\n")
-    src = tmp_path / "m.csv"
-    src.write_bytes(text.encode())
+def test_words_the_firmware_does_not_know_import_warn_and_export_as_read(client, tmp_path):
+    """One typo used to turn the whole file away, so it could not be opened to fix it
+    (104 of 131 community workbooks, 2026-11-23). The firmware skips such a word, so
+    core warns; the row is stored as read, the export writes the same bytes back, and
+    the catalog the editor's pickers are built from never offers the word."""
+    rows = ("increment_mode,normal,right_sip,", "x,hold 5,lip,", "fire_button,normal,lip,",
+            "circle,normal,circle,", "left_joy_up,normal,up,")
+    src = _csv(tmp_path, "m.csv", _mode_block(1, rows=rows))
     r = _post(client, src)
-    assert r.status_code == 422, r.text
-    detail = r.json()["detail"]
-    assert "A2" in detail["message"]
-    assert client.get("/profiles").json() == []
+    assert r.status_code == 201, r.text
+    got = r.json()
+    assert got["findings"]["errors"] == 0, got["findings"]
+    said = [f["message"] for f in got["findings"]["findings"] if f["severity"] == "warning"]
+    assert any("unknown output function 'hold'" in m for m in said)
+    assert any("unknown output 'fire_button'" in m for m in said)
+    assert any("unknown input 'circle'" in m for m in said)
+    stored = got["profile"]["modes"][0]["mappings"]
+    assert [(m["output"], m["function"], m["params"], m["inputs"]) for m in stored[1:4]] == [
+        ("x", "hold", [5], ["lip"]), ("fire_button", "normal", [], ["lip"]), ("circle", "normal", [], ["circle"])]
+    pid = got["profile"]["id"]
+    assert client.get(f"/profiles/{pid}/export.csv").content == src.read_bytes()
+    cat = client.get("/catalog").json()
+    assert "hold" not in [f["name"] for f in cat["functions"]]
+    assert "fire_button" not in [o["name"] for o in cat["outputs"]]
+    assert "circle" not in [i["name"] for i in cat["inputs"]]
+    # what GET returns PUTs back, typo and all, and a copy carries it too
+    doc = client.get(f"/profiles/{pid}").json()
+    assert client.put(f"/profiles/{pid}", json=doc).status_code == 200
+    assert client.get(f"/profiles/{pid}/export.csv").content == src.read_bytes()
+    assert client.post(f"/profiles/{pid}/duplicate").status_code == 201
+    for path in ("card.html", "summary.html", "export.xlsx", "validate"):
+        assert client.get(f"/profiles/{pid}/{path}").status_code == 200, path
+
+
+def test_a_save_cannot_mint_a_word_no_file_brought_in(client, tmp_path):
+    """The save path carries a word a stored profile already holds and refuses any
+    other, so the editor (or anything else calling the API) cannot invent a keyword."""
+    base = {"name": "T", "csv_filename": "t.csv"}
+    for mapping in ({"output": "fire_button", "inputs": ["lip"]},
+                    {"output": "x", "inputs": ["chin"]},
+                    {"output": "x", "function": "hold", "inputs": ["lip"]}):
+        r = client.post("/profiles", json={**base, "modes": [{"name": "M", "mappings": [mapping]}]})
+        assert r.status_code == 422 and "pick one from the list" in r.text, (mapping, r.text)
+    # the live check takes the same rows and describes them instead
+    r = client.post("/profiles/validate", json={**base, "modes": [{"name": "M", "mappings": [
+        {"output": "x", "inputs": ["chin"]}]}]})
+    assert r.status_code == 200 and any("unknown input 'chin'" in f["message"] for f in r.json()["findings"])
+
+
+def test_unknown_words_leave_the_catalog_tables_once_nothing_uses_them(client, tmp_path, Session):
+    from app import models as M
+    from app.seed import seed_catalogs
+    rows = ("increment_mode,normal,right_sip,", "x,hold 5,chin,")
+    pid = _post(client, _csv(tmp_path, "m.csv", _mode_block(1, rows=rows))).json()["profile"]["id"]
+    with Session() as db:
+        seed_catalogs(db)                                  # a restart while the profile exists
+        assert db.get(M.FunctionCatalog, "hold") and db.get(M.InputCatalog, "chin")
+    assert client.delete(f"/profiles/{pid}").status_code == 204
+    with Session() as db:
+        seed_catalogs(db)
+        assert db.get(M.FunctionCatalog, "hold") is None and db.get(M.InputCatalog, "chin") is None
+        assert db.get(M.InputCatalog, "lip") and db.get(M.FunctionCatalog, "normal")
+
+
+def test_a_filename_the_device_cannot_load_is_put_right_on_import_and_said(client, tmp_path):
+    """A2 with a space, a path or no .csv used to refuse the import. The profile now
+    comes in under a name that works and the import says what A2 held. A path never
+    survives: only the stem is used, through the one filename rule."""
+    for a2, want in (("../evil.csv", "evil.csv"), ("Helldivers II.csv", "helldivers_ii.csv"), ("", "t.csv")):
+        text = (f"QuadStick Configuration,Version 1.4,,T\r\nProfile Name,,M,\r\n{a2},,Normal,\r\n"
+                "Output or Function,Function,usb,\r\nincrement_mode,normal,right_sip,\r\n\r\n"
+                "Preferences,\r\n,,,,\r\nPreference,Value,Units,Description,\r\n\r\n")
+        src = tmp_path / "m.csv"
+        src.write_bytes(text.encode())
+        r = _post(client, src)
+        assert r.status_code == 201, (a2, r.text)
+        assert r.json()["profile"]["csv_filename"] == want
+        assert r.json()["findings"]["errors"] == 0, r.json()["findings"]
+        note = [f for f in r.json()["findings"]["findings"] if f"Saved here as {want}" in f["message"]]
+        assert len(note) == 1 and note[0]["severity"] == "warning" and note[0]["row"] == 2
+        assert client.get(f"/profiles/{r.json()['profile']['id']}/export.csv").status_code == 200
 
 
 def test_an_empty_function_cell_and_an_override_rows_column_b_round_trip(client, tmp_path):
@@ -473,12 +529,12 @@ def test_hidden_drive_mode_in_default_csv_blocks_export(client, tmp_path):
 
 def test_import_refusal_carries_the_findings_and_leaves_no_half_profile(client, tmp_path):
     """Whatever refuses the import, the response carries the findings and nothing is stored."""
-    rows = ("increment_mode,normal,right_sip,", "fire_button,normal,lip,")     # unknown output
-    r = _post(client, _csv(tmp_path, "m.csv", _mode_block(1, rows=rows)))
+    body = "".join(_mode_block(n, label=f"M{n}") for n in range(1, 18))           # a 17th mode
+    r = _post(client, _csv(tmp_path, "m.csv", body))
     assert r.status_code == 422, r.text
     detail = r.json()["detail"]
-    assert "fire_button" in detail["message"]
-    assert any("fire_button" in f["message"] for f in detail["validation"]["findings"])
+    assert "17 modes" in detail["message"]
+    assert any("17 modes" in f["message"] for f in detail["validation"]["findings"])
     assert client.get("/profiles").json() == []
     # and the session is usable afterwards
     assert upload(client, FIXTURES / "cod.csv")["profile"]["id"]

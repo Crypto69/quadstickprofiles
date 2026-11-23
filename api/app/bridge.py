@@ -1,5 +1,6 @@
 """DB rows <-> qsprofile.Config. Every parse / validate / convert / write /
 render call goes through core/qsprofile; this module only shuttles data."""
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 from qsprofile import Config, Mode as CMode, Mapping as CMapping, validate
 from qsprofile import catalog as C
@@ -9,19 +10,34 @@ from .catalog_seed import output_family_group
 ROW_OFFSET = 4          # data rows start at spreadsheet row 4 -> row_order 0 == row 4
 
 
-def ensure_output(db: Session, name: str):
-    """Regex-family outputs (kb_*, ir_*) are valid without being pre-seeded;
-    add them to the catalog on first sight so the FK holds. Unknown -> ValueError.
-    Two requests can meet here on the same new name, so the insert is
+# A word in a file that the firmware does not know: an output it would skip the row
+# for, an input cell it would drop, a function cell it would read as normal. Core
+# reports each as a warning, so the file has to be storable to be fixed here, and the
+# three keyword columns are foreign keys. Such a word therefore gets a catalog row of
+# its own, marked UNKNOWN, on the day a file brings it in. `GET /catalog` serves only
+# what core knows (known_input / known_output / known_function), so the editor never
+# offers one: it shows it on the row that holds it and nowhere else.
+UNKNOWN = "unknown"
+_UNKNOWN_SORT = 20_000
+
+
+def known_input(name: str) -> bool:
+    return C.classify_input(name) is not None
+
+
+def known_output(name: str) -> bool:
+    return output_family_group(name) is not None
+
+
+def known_function(name: str) -> bool:
+    return name in C.FUNCTIONS
+
+
+def _insert_once(db: Session, model, row: dict):
+    """Two requests can meet here on the same new name, so the insert is
     `ON CONFLICT DO NOTHING`: the loser simply finds the row already there
     instead of failing the whole request. Postgres and SQLite are the only two
     backends this project supports, and both have it."""
-    if db.get(M.OutputCatalog, name):
-        return
-    grp = output_family_group(name)
-    if grp is None:
-        raise ValueError(f"Unknown output '{name}'")
-    row = dict(name=name, grp=grp, label=C.output_label(name), sort_order=10_000)
     dialect = db.get_bind().dialect.name
     if dialect == "postgresql":
         from sqlalchemy.dialects.postgresql import insert
@@ -29,26 +45,62 @@ def ensure_output(db: Session, name: str):
         from sqlalchemy.dialects.sqlite import insert
     else:
         raise RuntimeError(f"unsupported database backend '{dialect}'")
-    db.execute(insert(M.OutputCatalog).values(**row).on_conflict_do_nothing(index_elements=["name"]))
+    db.execute(insert(model).values(**row).on_conflict_do_nothing(index_elements=["name"]))
 
 
-def check_input(name: str):
-    if C.classify_input(name) is None:
-        raise ValueError(f"Unknown input '{name}'")
+def ensure_output(db: Session, name: str):
+    """Make the output FK hold. Regex-family outputs (kb_*, ir_*) are valid without
+    being pre-seeded and are added on first sight under their own group; a word the
+    firmware does not know is added as UNKNOWN (see above)."""
+    if db.get(M.OutputCatalog, name):
+        return
+    grp = output_family_group(name)
+    _insert_once(db, M.OutputCatalog, dict(
+        name=name, grp=grp or UNKNOWN, label=C.output_label(name) or name,
+        sort_order=10_000 if grp else _UNKNOWN_SORT))
 
 
-def check_function(name: str):
-    """Only the name: `mappings.function` is a foreign key to function_catalog, so an
-    unknown one cannot be stored. An empty cell is fine (NULL; the device reads it as
-    normal). Bad parameters are stored as they are and surface as findings, so the
-    file round-trips and the editor can show the row."""
-    if name and name not in C.FUNCTIONS:
-        raise ValueError(f"Unknown output function '{name}'")
+def ensure_input(db: Session, name: str):
+    """Make the input FK hold. Every input core knows is seeded, so anything that
+    reaches the insert is a word from a file that the firmware would drop."""
+    if db.get(M.InputCatalog, name):
+        return
+    _insert_once(db, M.InputCatalog, dict(name=name, kind=UNKNOWN, label=name, sort_order=_UNKNOWN_SORT))
+
+
+def ensure_function(db: Session, name: str):
+    """Make the function FK hold. An empty cell is NULL and needs no row; an unknown
+    name is kept as read (the device treats the cell as normal) with no parameter
+    count, since nothing is known about it."""
+    if not name or db.get(M.FunctionCatalog, name):
+        return
+    _insert_once(db, M.FunctionCatalog, dict(name=name, max_params=None, description=None,
+                                             sort_order=_UNKNOWN_SORT))
 
 
 def check_preference(key: str):
     if key not in C.PREFERENCES:
         raise ValueError(f"Unknown preference '{key}'")
+
+
+def prune_unknown_words(db: Session, inputs, outputs, functions):
+    """Drop the UNKNOWN catalog rows nothing uses any more: the typo was fixed or its
+    profile deleted. Run with the catalog seed at start-up, so a word a save may carry
+    (profiles._modes_from_body) is only ever one some stored profile still holds.
+    Takes the rows the seed has already loaded, so a database with no such word (the
+    usual case) costs no query at all."""
+    for rows, known, used in (
+            (outputs, known_output, lambda names: select(M.Mapping.output).where(M.Mapping.output.in_(names))),
+            (functions, known_function, lambda names: select(M.Mapping.function).where(M.Mapping.function.in_(names))),
+            (inputs, known_input, lambda names: select(M.MappingInput.input).where(M.MappingInput.input.in_(names))
+                .union(select(M.InputName.input).where(M.InputName.input.in_(names))))):
+        strangers = [r for r in rows if not known(r.name)]
+        if not strangers:
+            continue
+        in_use = set(db.scalars(used([r.name for r in strangers])))
+        for row in strangers:
+            if row.name not in in_use:
+                db.delete(row)
 
 
 # ------------------------------------------------------------- Config -> rows
@@ -69,9 +121,9 @@ def fill_profile_from_config(db: Session, p: M.Profile, cfg: Config):
                                             comment=mp.comment or None))
                 continue
             ensure_output(db, mp.output)
-            check_function(mp.function)
-            for inp in mp.inputs:
-                check_input(inp)
+            ensure_function(db, mp.function)
+            for inp in mp.inputs[:8]:
+                ensure_input(db, inp)
             # what the parser gave, nothing substituted: an empty function cell stays
             # empty (NULL) so the export is the file that came in
             row = M.Mapping(row_order=i, kind="mapping", output=mp.output,

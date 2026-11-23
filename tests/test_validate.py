@@ -92,7 +92,6 @@ def test_hidden_drive_in_default_csv_is_an_error():
     ("repeat -1", "outside 0"),
     ("pulse 16384", "14-bit"),
     ("delay_on 0 500", "packed 0"),
-    ("hold", "Unknown output function"),
     ("toggle 1", "at most 0 parameter"),
     ("repeat 2.5", "whole numbers"),
     ("repeat 05 2000", "written plainly"),
@@ -107,6 +106,40 @@ def test_function_param_rules_reject(cell, fragment):
                   row(output="increment_mode", inputs=["right_sip"])])
     hits = [f for f in errors(validate(c)) if fragment in f[3]]
     assert hits and hits[0][1] == 1 and hits[0][2] == 4, validate(c)
+
+
+def test_words_the_firmware_does_not_know_are_warnings_that_say_what_it_does():
+    """The firmware skips a row whose output it does not know, reads an unknown
+    function cell as normal, and drops an unknown input cell. None of that is a
+    misread file, so none of it blocks export (decided 2026-11-23); each warning
+    says what the device does with the row."""
+    c = cfg(rows=[row(output="not_an_output", inputs=["lip"]),                       # row 4
+                  row(output="x", function="hold", inputs=["mp_left_sip"])    ,      # row 5
+                  row(output="circle", inputs=["circle"]),                            # row 6
+                  row(output="square", inputs=["triangle", "mp_left_puff"]),          # row 7
+                  row(output="triangle", inputs=["delay_on 250 then"]),               # row 8
+                  row(output="increment_mode", inputs=["right_sip"])])
+    f = validate(c)
+    assert not errors(f), errors(f)
+    said = {(x[2], x[3]) for x in warnings(f)}
+    assert (4, "Row 4: unknown output 'not_an_output'; the QuadStick skips the whole row") in said
+    assert any(r == 5 and "unknown output function 'hold'" in m and "as normal" in m for r, m in said)
+    assert (6, "Row 6: unknown input 'circle' in column C; the QuadStick skips the cell, "
+               "so circle never fires") in said
+    assert (7, "Row 7: unknown input 'triangle' in column C; the QuadStick skips the cell, "
+               "so square fires on mp_left_puff alone") in said
+    assert any(r == 8 and "looks like a comment" in m and "column K" in m for r, m in said)
+
+
+def test_only_rows_the_firmware_accepts_count_towards_the_128():
+    """The firmware's row loop skips an unknown output before it counts the row."""
+    from qsprofile.catalog import MAX_ROWS_PER_MODE
+    rows = [row(output="x", inputs=["lip"]) for _ in range(MAX_ROWS_PER_MODE - 1)]
+    rows += [row(output="increment_mode", inputs=["right_sip"])]
+    rows += [row(output="not_an_output", inputs=["lip"]) for _ in range(5)]
+    assert not [x for x in errors(validate(cfg(rows=rows))) if "at most" in x[3]]
+    rows += [row(output="circle", inputs=["lip"])]
+    assert [x for x in errors(validate(cfg(rows=rows))) if "has 129 rows" in x[3]]
 
 
 @pytest.mark.parametrize("cell", ["repeat 5 2000", "pulse 100 0", "greater_than 99", "normal", "toggle"])
@@ -294,10 +327,14 @@ def test_profile_scope_preferences_are_validated():
     f = validate(cfg(preferences={"volume": "999", "mouse_speed": "1,2", "some_future": "9",
                                   "enable_DS3_emulation": "9", "enable_rumble": "2"}))
     msgs = [x[3] for x in errors(f)]
-    assert any("Speaker volume" in m and "highest" in m for m in msgs)
     assert any("mouse_speed" in m and "comma" in m for m in msgs)
     assert any("enable_DS3_emulation" in m and "must be one of" in m for m in msgs)
-    assert any("enable_rumble" in m and "highest the QuadStick accepts is 1" in m for m in msgs)
+    # outside the range QuadStick's own tools offer: the firmware uses the number as
+    # written, so it is a warning that does not block export
+    assert not any("Speaker volume" in m or "enable_rumble" in m for m in msgs)
+    warned = [x[3] for x in warnings(f)]
+    assert any("Speaker volume (volume) is 999; the usual range is 0 to 100" in m for m in warned)
+    assert any("enable_rumble" in m and "is 2; it is either 0 or 1" in m for m in warned)
     assert any(x[0] == "info" and "some_future" in x[3] and "not a setting" in x[3] for x in f)
 
 
@@ -362,7 +399,7 @@ def test_new_2373_keywords_no_longer_block_export():
                   row(output="increment_mode", inputs=["right_sip"])])
     assert not errors(validate(c))
     c.modes[0].mappings[1].output = "kb_leftshift"
-    assert [x for x in errors(validate(c)) if "Unknown output 'kb_leftshift'" in x[3]]
+    assert [x for x in warnings(validate(c)) if "unknown output 'kb_leftshift'" in x[3]]
 
 
 # ---------------------------------------------------------------- firmware behaviours (Part 3)

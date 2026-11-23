@@ -54,12 +54,27 @@ describe('DeviceProfiles', () => {
     expect(w.findAll('thead .led-num').map((n) => n.text())).toEqual(['1', '2', '3', '4', '5'])
   })
 
-  it('uses the device colours past file 5, and says when the lights run out', () => {
-    const names = Array.from({ length: 17 }, (_, i) => `p${String(i).padStart(2, '0')}.csv`)
+  it('uses the device colours past file 5, and carries on to file 32', () => {
+    const names = Array.from({ length: 34 }, (_, i) => `p${String(i).padStart(2, '0')}.csv`)
     const w = withBackups([backup(names)])
     expect(lit(w, 6)).toEqual(['off', 'purple', 'off', 'off', 'purple']) // 7 = 5 + 2
     expect(lit(w, 11)).toEqual(['off', 'purple', 'off', 'off', 'blue']) // 12 = 10 + 2
-    expect(row(w, 16).text()).toContain('no lights')
+    // the profile switch goes past the 16 a mode can have
+    expect(lit(w, 16)).toEqual(['off', 'purple', 'off', 'off', 'red']) // file 17
+    expect(lit(w, 19)).toEqual(['blue', 'blue', 'blue', 'blue', 'blue']) // file 20
+    expect(row(w, 31).text()).not.toContain('cannot pick')
+    // and stops at 32: the file is on the drive, but nothing reaches it
+    expect(row(w, 32).text()).toContain('past 32: the QuadStick cannot pick it')
+    expect(lit(w, 32)).toEqual(['off', 'off', 'off', 'off', 'off'])
+  })
+
+  it('names a file the QuadStick leaves off the switch, and why', () => {
+    const w = withBackups([backup(['default.csv', 'myprefs.csv', 'prefs.csv', 'cod.csv'])])
+    expect(w.findAll('tbody .name').map((n) => n.text())).toEqual(['default.csv', 'cod.csv'])
+    const note = w.find('.skipped').text()
+    expect(note).toContain('myprefs.csv')
+    expect(note).toContain('can never be picked')
+    expect(note).not.toContain('default.csv')
   })
 
   it('reads the newest backup only', () => {

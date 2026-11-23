@@ -1,13 +1,40 @@
 import { describe, expect, it } from 'vitest'
 import {
   FRONT_HOLES, FRONT_LEDS, FRONT_PARTS, HOLE_COMBOS, REAR_JACKS, STRENGTHS,
-  inputFor, ledPatternClashes, ledSentence, ledsFor,
+  MAX_SELECTABLE_FILES, fileLedsFor, inputFor, ledPatternClashes, ledSentence, ledsFor,
 } from './layout'
 
 /** The lit LEDs as "n colour" pairs, so a failing test reads like the firmware table. */
 function lit(n: number) {
   return ledsFor(n).flatMap((c, i) => (c === 'off' ? [] : [`${i + 1} ${c}`]))
 }
+
+describe('fileLedsFor', () => {
+  it('lights files 1 to 16 exactly as modes 1 to 16', () => {
+    for (let n = 1; n <= 16; n++) expect(fileLedsFor(n)).toEqual(ledsFor(n))
+  })
+
+  it('carries on to file 32 with the QuadStick Manager table', () => {
+    expect(fileLedsFor(17)).toEqual(['off', 'purple', 'off', 'off', 'red'])
+    expect(fileLedsFor(19)).toEqual(['off', 'off', 'off', 'purple', 'red'])
+    expect(fileLedsFor(20)).toEqual(['blue', 'blue', 'blue', 'blue', 'blue'])
+    expect(fileLedsFor(25)).toEqual(['blue', 'blue', 'blue', 'blue', 'purple'])
+    expect(fileLedsFor(30)).toEqual(['red', 'red', 'red', 'red', 'purple'])
+    expect(fileLedsFor(32)).toEqual(['red', 'purple', 'red', 'red', 'red'])
+  })
+
+  it('gives every one of the 32 files its own pattern, and none past 32', () => {
+    const seen = new Set<string>()
+    for (let n = 1; n <= MAX_SELECTABLE_FILES; n++) seen.add(fileLedsFor(n).join(','))
+    expect(seen.size).toBe(32)
+    expect(fileLedsFor(33)).toEqual(['off', 'off', 'off', 'off', 'off'])
+  })
+
+  it('hands out a copy, so a caller cannot change the table', () => {
+    fileLedsFor(20)[0] = 'off'
+    expect(fileLedsFor(20)[0]).toBe('blue')
+  })
+})
 
 describe('ledsFor', () => {
   // The firmware's update_active_config_leds, and render.leds() in core/qsprofile,

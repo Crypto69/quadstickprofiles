@@ -42,6 +42,20 @@ describe('FunctionPicker', () => {
     expect(text).toContain('auto-fires while held')
   })
 
+  it('shows a function the firmware does not know as the current one, and says what it does', async () => {
+    const w = await setup('hold', [5])
+    const select = w.find('select')
+    expect((select.element as HTMLSelectElement).value).toBe('hold')
+    expect(select.findAll('option')[0]!.text()).toBe('(current) hold')
+    expect(w.find('.unknown').text()).toContain('reads this as normal')
+    await select.setValue('toggle')
+    expect(w.emitted('update')!.at(-1)).toEqual(['toggle', []])
+    // a known function never gets the extra option
+    const known = await setup('toggle')
+    expect(known.find('select').text()).not.toContain('(current)')
+    expect(known.find('.unknown').exists()).toBe(false)
+  })
+
   it('shows no parameter boxes for a function that takes none', async () => {
     const w = await setup('normal')
     expect(w.findAll('input[type="number"]')).toHaveLength(0)

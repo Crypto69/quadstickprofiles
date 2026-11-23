@@ -88,7 +88,7 @@ def test_check_and_convert_both_stop_on_an_error(tmp_path, capsys):
                     b"Profile Name,,Left joy,\r\n"
                     b"bad.csv,,Normal,\r\n"
                     b"Output or Function,Function,usb,\r\n"
-                    b"not_an_output,normal,lip,\r\n"
+                    b"x,repeat 0,lip,\r\n"            # divides by zero in the firmware
                     b"\r\n")
     assert main(["check", str(src)]) == 1
     assert "error" in capsys.readouterr().out

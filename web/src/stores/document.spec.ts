@@ -337,6 +337,17 @@ describe('modes', () => {
     expect(store.doc!.modes.map((m) => m.name)).toEqual(['Left', 'Right'])
   })
 
+  it('gives a new mode a way out on the side tube', async () => {
+    const store = await loaded()
+    const mode = store.addMode('Driving', 16)!
+    expect(mode.mappings.map((r) => [r.output, r.function, r.inputs])).toEqual([
+      ['increment_mode', 'normal', ['right_sip']],
+      ['decrement_mode', 'normal', ['right_puff']],
+    ])
+    expect(store.selectedModeKey).toBe(mode.key)
+    expect(store.dirty).toBe(true)
+  })
+
   it('refuses to add past the firmware limit', async () => {
     const store = await loaded()
     for (let i = 0; i < 20; i++) store.addMode(`M${i}`, 16)

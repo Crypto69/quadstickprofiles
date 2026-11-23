@@ -70,21 +70,40 @@ export function sizeLabel(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 }
 
-/**
- * The profiles on the drive in the order the QuadStick counts them when you pick a
- * file with the joystick: `default.csv` is always file 1, then every other top-level
- * `.csv` in alphanumeric order (docs/research-report.md §2). `prefs.csv` holds the
- * device's settings, not a profile, so it has no number. The device lowercases names,
- * so they are shown and sorted that way. Folders and dot-files are not read.
- */
-export function profilesOnDrive(paths: Iterable<string>): string[] {
+/** Top-level `.csv` names, lowercased as the device lowercases them. */
+function topLevelCsv(paths: Iterable<string>): Set<string> {
   const names = new Set<string>()
   for (const path of paths) {
     const name = path.toLowerCase()
     if (name.includes('/') || name.startsWith('.') || !name.endsWith('.csv')) continue
-    if (name === 'prefs.csv') continue
     names.add(name)
   }
-  const rest = [...names].filter((n) => n !== 'default.csv').sort((a, b) => (a < b ? -1 : a > b ? 1 : 0))
-  return names.has('default.csv') ? ['default.csv', ...rest] : rest
+  return names
+}
+
+/** The firmware leaves any name with `prefs.csv` in it off the profile switch. */
+const isPrefsName = (name: string) => name.includes('prefs.csv')
+
+/**
+ * The profiles on the drive in the order the QuadStick counts them when you pick a
+ * file with the joystick. This is the firmware's own list (`scan_files`, firmware
+ * 2373, as read by QuadStick Config Manager): each name lowercased, any name holding
+ * `prefs.csv` skipped, `default.csv` first, the rest in plain byte order — so
+ * `game10.csv` comes before `game2.csv`, and `_x.csv` before `a.csv`. Folders and
+ * dot-files are not read. The switch only reaches the first 32
+ * (`MAX_SELECTABLE_FILES` in device/layout.ts); the caller says so for the rest.
+ */
+export function profilesOnDrive(paths: Iterable<string>): string[] {
+  const names = [...topLevelCsv(paths)].filter((n) => !isPrefsName(n))
+  const rest = names.filter((n) => n !== 'default.csv').sort((a, b) => (a < b ? -1 : a > b ? 1 : 0))
+  return names.includes('default.csv') ? ['default.csv', ...rest] : rest
+}
+
+/**
+ * Files that look like profiles but that the QuadStick will never offer: a name with
+ * `prefs.csv` in it, such as `myprefs.csv`. `prefs.csv` itself is the device's
+ * settings and is not one of them.
+ */
+export function skippedByTheSwitch(paths: Iterable<string>): string[] {
+  return [...topLevelCsv(paths)].filter((n) => isPrefsName(n) && n !== 'prefs.csv').sort()
 }

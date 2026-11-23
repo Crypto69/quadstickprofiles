@@ -212,6 +212,10 @@ function addMode() {
       <p class="hint">
         {{ modes.length }} of {{ maxModes }} modes.
         <span v-if="full">That is the most the QuadStick reads.</span>
+        <span v-else>
+          A new mode starts with a way out: side tube sip for the next mode, puff for the one
+          before.
+        </span>
       </p>
     </div>
 

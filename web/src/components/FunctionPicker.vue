@@ -14,6 +14,14 @@ const functions = computed(() => catalog.catalog?.functions ?? [])
 /** An empty function cell is written back empty, but the device reads it as `normal`. */
 const fnName = computed(() => props.fn || 'normal')
 const current = computed(() => catalog.functionsByName.get(fnName.value) ?? null)
+/**
+ * A function name an imported file brought in that the firmware does not know. It is
+ * still the row's real value, so it is shown as the first option, marked "(current)",
+ * and said to be read as `normal`, instead of the list quietly showing something else.
+ */
+const unknownFn = computed(() =>
+  catalog.catalog && !current.value ? fnName.value : null,
+)
 const maxParams = computed(() => current.value?.max_params ?? 0)
 
 /**
@@ -130,11 +138,17 @@ function setParam(i: number, raw: string) {
     <div class="field">
       <label for="fn">How it behaves</label>
       <select id="fn" class="input" :value="fnName" @change="pick(($event.target as HTMLSelectElement).value)">
+        <option v-if="unknownFn" :value="unknownFn">(current) {{ unknownFn }}</option>
         <option v-for="f in functions" :key="f.name" :value="f.name">
           {{ f.name }} — {{ f.description }}
         </option>
       </select>
     </div>
+
+    <p v-if="unknownFn" class="hint doc unknown">
+      The QuadStick does not know <b>{{ unknownFn }}</b> and reads this as <b>normal</b>. Pick
+      the one you meant.
+    </p>
 
     <p v-if="current?.description" class="hint doc">{{ current.description }}</p>
 

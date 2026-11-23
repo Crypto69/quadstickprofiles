@@ -46,7 +46,7 @@ describe('prefs store', () => {
     const refusal = validation({
       errors: 1,
       findings: [
-        { severity: 'error', mode: null, row: null, message: 'Speaker volume (volume) is 900; the highest the QuadStick accepts is 100' },
+        { severity: 'error', mode: null, row: null, message: "Speaker volume (volume) must be a whole number, got 'loud'" },
       ],
     })
     vi.stubGlobal(
@@ -68,7 +68,7 @@ describe('prefs store', () => {
     expect(await store.save()).toBe(false)
     expect(store.values.volume).toBe('900') // still there to fix
     expect(store.dirty).toBe(true)
-    expect(store.refused?.findings[0]?.message).toContain('the highest the QuadStick accepts')
+    expect(store.refused?.findings[0]?.message).toContain('must be a whole number')
   })
 
   it('reverts to the last saved set', async () => {

@@ -1,7 +1,7 @@
 """Reading an uploaded file without trusting its size (W7).
 
 `await file.read()` with no argument buffers the whole body in memory. nginx caps
-`/api/` at 2 MB, but both compose files also publish the API directly on 8325 with
+`/api/` at 8 MB, but both compose files also publish the API directly on 8325 with
 no proxy in front of it, and the desktop build runs uvicorn on its own — so the cap
 has to live here as well.
 
@@ -18,8 +18,8 @@ CHUNK = 64 * 1024
 
 def _too_big(file: UploadFile, limit: int) -> HTTPException:
     name = file.filename or "the upload"
-    return HTTPException(413, f"{name} is larger than {limit // 1024} KB; "
-                              f"a QuadStick profile is a few KB")
+    return HTTPException(413, f"{name} is larger than {limit // 1024} KB; a device .csv is "
+                              f"a few KB and a Google Sheet download a few MB at most")
 
 
 async def read_capped(file: UploadFile, limit: int | None = None,

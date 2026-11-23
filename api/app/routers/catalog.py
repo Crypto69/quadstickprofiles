@@ -3,6 +3,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 from qsprofile import catalog as C
 from .. import models as M, schemas as S
+from ..bridge import known_input, known_output, known_function
 from ..db import get_session
 
 router = APIRouter(tags=["catalog"])
@@ -13,6 +14,12 @@ def get_catalog(db: Session = Depends(get_session)):
     inputs = db.scalars(select(M.InputCatalog).order_by(M.InputCatalog.sort_order)).all()
     outputs = db.scalars(select(M.OutputCatalog).order_by(M.OutputCatalog.sort_order, M.OutputCatalog.name)).all()
     functions = db.scalars(select(M.FunctionCatalog).order_by(M.FunctionCatalog.sort_order)).all()
+    # the tables also hold words an imported file brought in that the firmware does not
+    # know (bridge.UNKNOWN). The editor builds its pickers from this response, so only
+    # what core knows is served: a stored typo is shown on its row, never offered.
+    inputs = [i for i in inputs if known_input(i.name)]
+    outputs = [o for o in outputs if known_output(o.name)]
+    functions = [f for f in functions if known_function(f.name)]
     return S.CatalogOut(
         inputs=[S.InputEntry.model_validate(i, from_attributes=True) for i in inputs],
         outputs=[S.OutputEntry.model_validate(o, from_attributes=True) for o in outputs],

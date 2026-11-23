@@ -36,12 +36,15 @@ def test_template_helper_tabs_are_skipped_not_errors(tmp_path):
     assert not [x for x in problems if x[0] == "error"], problems
 
 
-def test_any_other_unknown_tab_is_still_an_error(tmp_path):
+def test_any_other_unknown_tab_is_left_out_and_named(tmp_path):
+    """A notes tab never reaches the device by any route, so it is not a fault in the
+    profile: it is left out and the import says which tab and why."""
     p = _workbook(tmp_path, ["Inputs", "Scratch"])
     cfg, problems = load(str(p))
     assert [m.name for m in cfg.modes] == ["Left joy"]
-    errs = [x for x in problems if x[0] == "error"]
-    assert len(errs) == 1 and "'Scratch'" in errs[0][3] and "A1" in errs[0][3]
+    assert not [x for x in problems if x[0] == "error"]
+    said = [x for x in problems if x[0] == "warning"]
+    assert len(said) == 1 and "'Scratch' is left out" in said[0][3] and "A1" in said[0][3]
 
 
 # ---------------------------------------------------------------- A1 matching
@@ -66,7 +69,11 @@ def test_a1_only_has_to_start_with_profile(tmp_path):
 
 
 @pytest.mark.parametrize("a1", ["profile name", "PROFILE", "Preference", "Infra"])
-def test_case_and_shorter_prefixes_are_still_errors(tmp_path, a1):
+def test_case_and_shorter_prefixes_are_not_read_as_sheets(tmp_path, a1):
+    """The firmware's match is case-sensitive and needs the whole first word, so such
+    a tab is left out like any other the device would not read. Here it was the only
+    mode, and a profile with no mode is still an error."""
+    from qsprofile import validate
     wb = Workbook()
     _mode_sheet(wb.active, "Left joy", "Left joy", [["increment_mode", "normal", "right_sip"]])
     wb.active["A1"] = a1
@@ -74,7 +81,8 @@ def test_case_and_shorter_prefixes_are_still_errors(tmp_path, a1):
     wb.save(p)
     cfg, problems = load(str(p))
     assert not cfg.modes
-    assert [x for x in problems if x[0] == "error" and "A1" in x[3]]
+    assert [x for x in problems if x[0] == "warning" and "is left out" in x[3] and "A1" in x[3]]
+    assert [x for x in validate(cfg, problems) if x[0] == "error" and "No mode sheets" in x[3]]
 
 
 # ---------------------------------------------------------------- file handle

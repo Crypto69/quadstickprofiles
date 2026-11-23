@@ -199,6 +199,11 @@ class MappingIn(BaseModel):
 
     _text = field_validator("value")(_safe)   # the override value is a cell in the file
 
+    # No catalog check on the three keyword cells here. An import stores a word the
+    # firmware does not know (core warns about it), and what GET returns must PUT back
+    # or one typo would freeze every later save. The save path refuses a word that is
+    # neither in the catalog nor already stored (profiles._modes_from_body); the live
+    # check takes anything and lets core describe it.
     @field_validator("function")
     @classmethod
     def _function(cls, v, info):
@@ -206,22 +211,12 @@ class MappingIn(BaseModel):
             return cls._column_b(v)
         if v is None:
             return "normal"
-        if v and v not in C.FUNCTIONS:
-            raise ValueError(f"Unknown output function '{v}'")
         return v
 
     @classmethod
     def _column_b(cls, v):
         """An override row's column B: text the device ignores, but a cell in the file."""
         return _safe(v) if v else ""
-
-    @field_validator("inputs")
-    @classmethod
-    def _inputs(cls, v):
-        for i in v:
-            if C.classify_input(i) is None:
-                raise ValueError(f"Unknown input '{i}'")
-        return v
 
     @model_validator(mode="after")
     def _shape(self):
@@ -233,8 +228,8 @@ class MappingIn(BaseModel):
             if self.params:
                 raise ValueError("A preference override row takes no function parameters")
             return self
-        if output_family_group(self.output) is None:
-            raise ValueError(f"Unknown output '{self.output}' (outputs are stored under PlayStation names)")
+        if not self.output:
+            raise ValueError("a mapping row needs an output")
         if self.value:
             raise ValueError("`value` is only for kind='preference' rows")
         # an empty function cell with parameters would export as `x, 5,lip,`, which the
