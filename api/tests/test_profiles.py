@@ -177,6 +177,19 @@ def test_summary_is_three_columns_of_the_same_facts(client):
     assert "<th>Xbox</th>" in xbox
 
 
+def test_control_table_is_every_control_by_every_mode(client):
+    p = upload(client, FIXTURES / "ddfortnite.csv", game="Fortnite")["profile"]
+    r = client.get(f"/profiles/{p['id']}/controls.html")
+    assert r.status_code == 200 and "text/html" in r.headers["content-type"]
+    assert "every control, every mode" in r.text and "Modes 1 to 4 of 7" in r.text
+    assert "R2" in r.text
+
+    r = client.post(f"/profiles/{p['id']}/convert", json={"target": "xbox"})
+    xbox = client.get(f"/profiles/{r.json()['profile']['id']}/controls.html").text
+    assert ">RT<" in xbox and ">R2<" not in xbox
+    assert client.get("/profiles/99999/controls.html").status_code == 404
+
+
 def test_summary_opens_with_every_command_once(client):
     """Page 1 collapses the repeats; the per-mode tables below keep them."""
     p = upload(client, FIXTURES / "ddfortnite.csv", game="Fortnite")["profile"]

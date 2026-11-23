@@ -8,7 +8,8 @@ is quiet. A4 portrait, one page per mode, first page = orientation.
 import html
 import json
 from .catalog import (classify_input, PS_BUTTONS, XBOX_GLYPH, output_label, output_group,
-                     TUBES, TUBE_ORDER, JOY_ZONES, MODE_CHANGE_OUTPUTS)
+                     TUBES, TUBE_ORDER, JOY_DIRS, JOY_ZONES, MODE_CHANGE_OUTPUTS, FUNCTIONS,
+                     MAX_MODES)
 from .validate import unused_inputs
 
 GLYPH = dict(PS_BUTTONS)
@@ -26,6 +27,14 @@ def action_for(actions, mode, output):
     return per_mode.get(output) or actions.get("outputs", {}).get(output, "")
 
 
+# The short word a function prints as. The control table explains each one it uses
+# with catalog.FUNCTIONS, so a word here must still read right next to that sentence.
+FN_WORDS = {"toggle": "toggle", "repeat": "auto-fire", "pulse": "tap", "delay_on": "after delay",
+            "delay_off": "held after release", "tap": "tap", "delayed_latch": "hold to latch",
+            "force_off": "release", "duty": "pressure", "greater_than": "above",
+            "less_than": "below", "increment_value": "step up", "decrement_value": "step down"}
+
+
 def fn_tag(m):
     if m.function in ("normal", ""):          # an empty cell is normal to the device
         return ""
@@ -33,11 +42,7 @@ def fn_tag(m):
     # show the row), and an imported function name need not be a known keyword, so
     # both are escaped here like every other user string on the card.
     p = esc(" ".join(str(x) for x in m.params))
-    words = {"toggle": "toggle", "repeat": "auto-fire", "pulse": "tap", "delay_on": "after delay",
-             "delay_off": "held after release", "tap": "tap", "delayed_latch": "hold to latch",
-             "force_off": "release", "duty": "pressure", "greater_than": "above",
-             "less_than": "below", "increment_value": "step up", "decrement_value": "step down"}
-    word = esc(words.get(m.function, m.function))
+    word = esc(FN_WORDS.get(m.function, m.function))
     return f'<span class="fn">{word}{(" " + p) if p else ""}</span>'
 
 
@@ -665,6 +670,239 @@ def render_summary(cfg, actions):
     return (f'<!doctype html><html lang="en"><head><meta charset="utf-8">'
             f'<title>{esc(game or cfg.name)} QuadStick summary</title>'
             f'<style>{CSS}</style></head><body>' + bar + "".join(p) + '</body></html>')
+
+
+# ------------------------------------------------------------------ control table
+# The third way to print a profile, after QuadStick Config Manager's reference sheet
+# (ReferenceSheet.cs, docs/prior-art-qcm.md): one row per control, one column per
+# mode, so "what does a center sip do?" is answered for every mode by reading one
+# line across. Landscape, and never more than CONTROL_TABLE_MODES columns to a
+# page: a big profile takes more paper rather than smaller print.
+CONTROL_TABLE_MODES = 6
+
+# The order the controls are listed in, by where they are on the device.
+CONTROL_ZONES = [("joystick", "Joystick"), ("left", "Left hole"), ("center", "Center hole"),
+                 ("right", "Right hole"), ("combo", "Two or three holes at once"),
+                 ("side", "Side tube"), ("lip", "Lip button"), ("digital", "Switch jacks"),
+                 ("usb", "USB devices"), ("other", "Other inputs"),
+                 ("settings", "Settings in this mode")]
+_STRENGTH_RANK = {(a, s): i for i, (a, s, _) in enumerate(STRENGTH_ROWS)}
+_JOY_RANK = {d: i for i, d in enumerate(JOY_DIRS + JOY_ZONES + ["center", "any"])}
+
+CONTROLS_CSS = """
+@page { size: A4 landscape; margin: 10mm; }
+.page.controls { width:297mm; min-height:210mm; padding:10mm; }
+.controls h1 { margin-bottom:6px; }
+table.ct { border-collapse:collapse; width:100%; table-layout:fixed; margin-top:6px; }
+table.ct caption { text-align:left; font-weight:700; font-size:14px; padding-bottom:4px; }
+table.ct col.ctl { width:17%; }
+table.ct thead { display:table-header-group; }
+table.ct thead th { background:var(--ink); color:#fff; border:1px solid var(--ink); text-align:left;
+                    vertical-align:top; padding:5px 6px; font-size:13px;
+                    -webkit-print-color-adjust:exact; print-color-adjust:exact; }
+table.ct thead th .num { width:22px; height:22px; font-size:12px; margin-right:4px; vertical-align:middle; }
+table.ct thead th .leds { display:flex; margin:4px 0 0; }
+table.ct thead th .leds i { border-color:#fff; }
+table.ct thead th small { display:block; font-weight:400; font-size:10.5px; }
+table.ct th, table.ct td { border:1px solid var(--line); padding:4px 6px; vertical-align:top;
+                           overflow-wrap:anywhere; }
+table.ct tr { break-inside:avoid; page-break-inside:avoid; }
+table.ct tr.zone th { text-align:left; font-size:13px; background:#f4f4f1; border-top:2px solid var(--ink);
+                      -webkit-print-color-adjust:exact; print-color-adjust:exact; }
+table.ct tbody th { text-align:left; font-size:12.5px; font-weight:600; }
+table.ct tr.sip tbody th, table.ct tr.sip th { color:var(--sip); }
+table.ct tr.puff th { color:var(--puff); }
+table.ct td { font-size:12px; line-height:1.25; }
+table.ct td.none { color:#999; text-align:center; }
+table.ct td .ln + .ln { margin-top:4px; padding-top:4px; border-top:1px dotted var(--line); }
+table.ct td .glyph { font-weight:700; font-size:14px; }
+table.ct td .act { display:block; }
+table.ct td .act-note { display:block; font-size:11px; color:#555; font-style:italic; }
+table.ct td .fn { white-space:nowrap; display:inline-block; font-size:10px; color:#fff; background:var(--ink);
+                  border-radius:3px; padding:1px 4px; margin-left:4px; vertical-align:1px;
+                  -webkit-print-color-adjust:exact; print-color-adjust:exact; }
+.controls .after { margin-top:12px; font-size:12px; }
+.controls .after p { margin:3px 0; }
+.controls dl { display:grid; grid-template-columns:max-content 1fr; gap:2px 12px; margin:4px 0 0; }
+.controls dt { font-weight:700; } .controls dd { margin:0; }
+@media print { .page.controls { width:auto; min-height:0; padding:0; } }
+"""
+
+
+def control_label(name, actions):
+    """What one input is called on the control table, with the profile's own
+    hardware names (the owner's "Chin switch") where it has them."""
+    c = classify_input(name) or {}
+    if c.get("kind") == "lip":
+        lip = input_name(actions, "lip", "Lip button")
+        return lip + (" (soft)" if c["strength"] == "soft" else "")
+    if c.get("kind") == "digital":
+        return input_name(actions, name, c["label"])
+    return c.get("label") or name
+
+
+def control_place(name):
+    """(zone, rank) of the input a row is filed under."""
+    c = classify_input(name) or {}
+    kind = c.get("kind")
+    if kind in ("mouthpiece", "side"):
+        zone = c["tube"] if c["tube"] in ("left", "center", "right", "side") else "combo"
+        tube = TUBE_ORDER.index(c["tube"]) if c["tube"] in TUBE_ORDER else len(TUBE_ORDER)
+        return zone, (tube, _STRENGTH_RANK[(c["action"], c["strength"])])
+    if kind == "joystick":
+        return "joystick", (0 if c["ring"] != "inner" else 1, _JOY_RANK.get(c["dir"], 99))
+    if kind == "lip":
+        return "lip", (0 if c["strength"] == "hard" else 1, 0)
+    if kind == "digital":
+        return "digital", (c["number"], 0)
+    if kind == "usb":
+        return "usb", (0, 0)
+    return "other", (0, 0)
+
+
+def control_rows(cfg, actions):
+    """One row per control (or per sequence of controls), with every mode's lines.
+
+    A row is keyed by its inputs in order, so `Left sip then Center sip` is its own
+    row and is never mixed with a plain Center sip. It is filed under the input that
+    completes it, as the detailed sheets file a sequence's chip. Per-mode settings
+    get a row per setting name.
+    """
+    rows = {}
+    n = len(cfg.modes)
+    for i, mode in enumerate(cfg.modes):
+        for m in mode.mappings:
+            if m.kind == "preference":
+                key = ("set", m.output)
+                if key not in rows:
+                    rows[key] = {"zone": "settings", "rank": (0, 0), "seq": False,
+                                 "label": m.output, "cls": "", "cells": [[] for _ in range(n)]}
+                rows[key]["cells"][i].append(f'<div class="ln">{esc(m.value)}</div>')
+                continue
+            if not m.inputs:
+                continue
+            key = ("in",) + tuple(m.inputs)
+            if key not in rows:
+                zone, rank = control_place(m.inputs[-1])
+                act = (classify_input(m.inputs[-1]) or {}).get("action")
+                rows[key] = {"zone": zone, "rank": rank, "seq": len(m.inputs) > 1,
+                             "label": " then ".join(control_label(x, actions) for x in m.inputs),
+                             "cls": act or "", "cells": [[] for _ in range(n)]}
+            rows[key]["cells"][i].append(control_line(m, actions, mode, cfg.console))
+    return list(rows.values())
+
+
+def control_line(m, actions, mode, console):
+    """One mapping inside a cell: the button, how it behaves, and what it is for."""
+    label = glyphs(console).get(m.output) or output_label(m.output) or m.output
+    act = action_for(actions, mode, m.output)
+    out = f'<div class="ln"><span class="glyph">{esc(label)}</span>{fn_tag(m)}'
+    if act:
+        out += f'<span class="act">{esc(act)}</span>'
+    if m.comment and m.comment != act:
+        out += f'<span class="act-note">{esc(m.comment)}</span>'
+    return out + "</div>"
+
+
+def control_mode_heading(mode):
+    past = (f'<small>Past the {MAX_MODES} modes the QuadStick reads</small>'
+            if mode.number > MAX_MODES else "")
+    return (f'<th scope="col"><span class="num">{mode.number}</span>{esc(mode.name)}'
+            f'{past}{led_html(mode.number) if mode.number <= MAX_MODES else ""}</th>')
+
+
+def render_controls(cfg, actions):
+    """Every control down the side, every mode across the top.
+
+    Shaped after QuadStick Config Manager's printed reference sheet: the page for
+    somebody helping at the chair, who wants to know what one control does without
+    turning a page per mode. Modes go CONTROL_TABLE_MODES to a page; past that the
+    table continues on the next page with the same rows.
+    """
+    game = actions.get("game", "")
+    rows = control_rows(cfg, actions)
+    zone_rank = {z: i for i, (z, _) in enumerate(CONTROL_ZONES)}
+    zone_title = dict(CONTROL_ZONES)
+    zone_title["lip"] = input_name(actions, "lip", "Lip button")
+    rows.sort(key=lambda r: (zone_rank[r["zone"]], r["seq"], r["rank"], r["label"]))
+    modes = cfg.modes
+    # Share the modes out evenly: seven modes print as 4 + 3, not 6 + a lonely 1.
+    sheets = max(1, -(-len(modes) // CONTROL_TABLE_MODES))
+    per = max(1, -(-len(modes) // sheets))
+    pages = []
+    for first in range(0, max(len(modes), 1), per):
+        chunk = modes[first:first + per]
+        p = ['<section class="page controls">',
+             f'<h1>{esc(game or cfg.name)} <small>every control, every mode — {esc(cfg.filename)}</small></h1>']
+        if not modes:
+            p.append('<p>This profile has no modes, so there are no controls to list.</p>')
+        elif not rows:
+            p.append('<p>No control is set in any mode yet.</p>')
+        else:
+            p.append('<table class="ct">')
+            if sheets > 1:
+                which = (f'Mode {chunk[0].number}' if len(chunk) == 1
+                         else f'Modes {chunk[0].number} to {chunk[-1].number}')
+                p.append(f'<caption>{which} of {len(modes)}</caption>')
+            p.append('<colgroup><col class="ctl">' + '<col>' * len(chunk) + '</colgroup>')
+            p.append('<thead><tr><th scope="col">Control</th>'
+                     + "".join(control_mode_heading(m) for m in chunk) + '</tr></thead>')
+            zone = None
+            # A control that does nothing in any mode on this page is left off it,
+            # so the joystick's eight zones do not take half a page of dashes.
+            here = [r for r in rows if any(r["cells"][i] for i in range(first, first + len(chunk)))]
+            for r in here:
+                if r["zone"] != zone:
+                    if zone is not None:
+                        p.append('</tbody>')
+                    zone = r["zone"]
+                    p.append(f'<tbody><tr class="zone"><th colspan="{len(chunk) + 1}" '
+                             f'scope="rowgroup">{esc(zone_title[zone])}</th></tr>')
+                cls = f' class="{r["cls"]}"' if r["cls"] else ""
+                cells = []
+                for i in range(first, first + len(chunk)):
+                    lines = r["cells"][i]
+                    cells.append(f'<td>{"".join(lines)}</td>' if lines
+                                 else '<td class="none">–</td>')
+                p.append(f'<tr{cls}><th scope="row">{esc(r["label"])}</th>{"".join(cells)}</tr>')
+            p.append('</tbody></table>')
+        if first + per >= len(modes):
+            p.append(control_table_notes(cfg, rows))
+        p.append('</section>')
+        pages.append("".join(p))
+    bar = ('<div class="printbar noprint">'
+           '<button type="button" onclick="window.print()">Print this table</button>'
+           f'<span>Every control down the side, every mode across the top, up to '
+           f'{CONTROL_TABLE_MODES} modes to a landscape page.</span></div>')
+    return (f'<!doctype html><html lang="en"><head><meta charset="utf-8">'
+            f'<title>{esc(game or cfg.name)} QuadStick control table</title>'
+            f'<style>{CSS}{CONTROLS_CSS}</style></head><body>' + bar + "".join(pages)
+            + '</body></html>')
+
+
+def control_table_notes(cfg, rows):
+    """What the marks on the table mean, and each behaviour word it uses."""
+    if not rows:
+        return ""
+    out = ['<div class="after"><div class="legend"><span class="s">Sip = draw air in</span>'
+           '<span class="p">Puff = blow out</span></div>',
+           '<p>A dash means the control does nothing in that mode. A control that does '
+           'nothing in any mode on a page is not listed on that page.</p>']
+    if any(r["seq"] for r in rows):
+        out.append('<p>A control with “then” is done in that order, one after the other. '
+                   'Doing only one part does nothing.</p>')
+    used = []
+    for mode in cfg.modes:
+        for m in mode.active():
+            if m.kind == "mapping" and m.function in FUNCTIONS and m.function != "normal" \
+                    and m.function not in used:
+                used.append(m.function)
+    if used:
+        out.append('<h2>What the words mean</h2><dl>' + "".join(
+            f'<dt>{esc(FN_WORDS.get(f, f))}</dt><dd>{esc(FUNCTIONS[f][1].capitalize())}.</dd>'
+            for f in used) + '</dl>')
+    out.append('</div>')
+    return "".join(out)
 
 
 def render(cfg, actions, findings):

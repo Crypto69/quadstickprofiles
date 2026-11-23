@@ -256,3 +256,70 @@ def test_console_naming_does_not_leak_between_renders():
     assert ">LB<" in xbox_after_ps and ">LB<" not in ps_first
     assert ">L1<" in ps_first and ">L1<" not in xbox_after_ps
     assert "<th>Xbox</th>" in xbox_first_summary and "<th>PS5</th>" in ps_summary
+
+
+# ------------------------------------------------------------------ control table
+def _control_table(cfg, actions=None):
+    from qsprofile import render_controls
+    return render_controls(cfg, actions or {})
+
+
+def test_control_table_has_one_row_per_control_and_one_column_per_mode():
+    """After QCM's reference sheet: read one line across to see what a control does
+    in every mode. Seven modes share out as 4 + 3, never 6 + a lonely 1."""
+    import json, re
+    from qsprofile import load
+    cfg, _ = load(str(FX / "ddfortnite.csv"))
+    actions = json.loads((FX.parent / "actions" / "actions_fortnite.json").read_text())
+    h = _control_table(cfg, actions)
+    assert h.startswith("<!doctype html>") and h.endswith("</html>")
+    assert "size: A4 landscape" in h
+    assert "<caption>Modes 1 to 4 of 7</caption>" in h
+    assert "<caption>Modes 5 to 7 of 7</caption>" in h
+    # the profile renames the lip button, and the table uses its name
+    assert '>Chin switch</th>' in h
+    # a control shows up once per page, its row filled across that page's modes
+    first = h[:h.index("Modes 5 to 7")]
+    assert first.count('<th scope="row">Center puff</th>') == 1
+    row = re.search(r'<th scope="row">Center puff</th>(.*?)</tr>', first).group(1)
+    assert row.count("<td") == 4 and row.count(">R2<") == 3
+    # a control that does nothing on a page is left off it: the D-pad zones live in mode 5 only
+    assert "Joystick NE" not in first and "Joystick NE" in h[h.index("Modes 5 to 7"):]
+    # each behaviour word it prints is explained once, at the end
+    assert "<h2>What the words mean</h2>" in h and "<dt>toggle</dt>" in h
+
+
+def test_control_table_puts_sequences_and_settings_on_their_own_rows():
+    from qsprofile import Config, Mode, Mapping
+    mode = Mode(number=1, name="Main", label="", channel="usb", mappings=[
+        Mapping(row=2, output="x", function="normal", params=[], inputs=["mp_center_sip"]),
+        Mapping(row=3, output="circle", function="normal", params=[],
+                inputs=["mp_left_sip", "mp_center_sip"]),
+        Mapping(row=4, output="mouse_speed", function="", params=[], inputs=[],
+                kind="preference", value="550"),
+    ])
+    h = _control_table(Config(name="T", filename="t.csv", modes=[mode]))
+    assert '<th scope="row">Center sip</th>' in h
+    assert '<th scope="row">Left sip then Center sip</th>' in h
+    assert "done in that order" in h
+    assert "Settings in this mode" in h and '<th scope="row">mouse_speed</th>' in h
+    assert ">550<" in h
+    assert "<caption>" not in h          # one page of modes needs no "Modes x to y"
+
+
+def test_control_table_escapes_everything_from_the_file():
+    from qsprofile import load
+    cfg, _ = load(str(FX / "ddfortnite.csv"))
+    cfg.modes[0].name = "<script>x</script>"
+    for m in cfg.modes[0].active():
+        m.comment = "Aim <down>"
+    m.function, m.params = "<b>bad</b>", ["<img src=x>"]
+    h = _control_table(cfg, {"game": "<i>G</i>"})
+    for raw in ("<script>x", "<down>", "<b>bad", "<img src=x", "<i>G</i>"):
+        assert raw not in h
+
+
+def test_zero_mode_control_table_returns_html():
+    from qsprofile import Config
+    h = _control_table(Config(name="Empty", filename="empty.csv", modes=[]))
+    assert h.startswith("<!doctype html>") and "no modes" in h

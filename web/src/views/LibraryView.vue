@@ -150,6 +150,11 @@ function printSummary(p: ProfileSummary) {
   openExternal(api.summaryUrl(p.id))
 }
 
+function printControls(p: ProfileSummary) {
+  // One row per control, one column per mode: what a control does in every mode.
+  openExternal(api.controlsUrl(p.id))
+}
+
 // ---------------------------------------------------------- name and filename
 /**
  * The QuadStick loads a profile by its *filename*. Duplicate used to fire straight
@@ -426,6 +431,9 @@ const suggestedFilename = computed(
           </button>
           <button class="btn btn--small" type="button" @click="printSummary(p)">
             Print summary
+          </button>
+          <button class="btn btn--small" type="button" @click="printControls(p)">
+            Print control table
           </button>
           <button
             class="btn btn--small"

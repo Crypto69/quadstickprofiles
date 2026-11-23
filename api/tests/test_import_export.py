@@ -366,7 +366,7 @@ def test_words_the_firmware_does_not_know_import_warn_and_export_as_read(client,
     assert client.put(f"/profiles/{pid}", json=doc).status_code == 200
     assert client.get(f"/profiles/{pid}/export.csv").content == src.read_bytes()
     assert client.post(f"/profiles/{pid}/duplicate").status_code == 201
-    for path in ("card.html", "summary.html", "export.xlsx", "validate"):
+    for path in ("card.html", "summary.html", "controls.html", "export.xlsx", "validate"):
         assert client.get(f"/profiles/{pid}/{path}").status_code == 200, path
 
 

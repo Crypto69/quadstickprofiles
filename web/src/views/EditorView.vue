@@ -250,6 +250,10 @@ function printCard() {
 function printSummary() {
   openExternal(api.summaryUrl(profileId.value))
 }
+
+function printControls() {
+  openExternal(api.controlsUrl(profileId.value))
+}
 </script>
 
 <template>
@@ -528,6 +532,9 @@ function printSummary() {
         Print detailed sheets
       </button>
       <button class="btn btn--small" type="button" @click="printSummary">Print summary</button>
+      <button class="btn btn--small" type="button" @click="printControls">
+        Print control table
+      </button>
       <button
         class="btn btn--small"
         type="button"

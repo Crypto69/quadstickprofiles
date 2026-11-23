@@ -10,7 +10,7 @@ from fastapi.responses import HTMLResponse
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
-from qsprofile import load, convert, write_csv, write_xlsx, render, render_summary
+from qsprofile import load, convert, write_csv, write_xlsx, render, render_summary, render_controls
 from qsprofile import catalog as C
 from qsprofile.catalog import check_csv_filename
 from qsprofile.validate import budget as core_budget
@@ -564,3 +564,10 @@ def summary_html(profile_id: int, db: Session = Depends(get_session)):
     """Compact one-table-per-mode cheat sheet: game action | QuadStick | console button."""
     p = _get(db, profile_id)
     return HTMLResponse(render_summary(config_from_profile(p), actions_for_profile(db, p)))
+
+
+@router.get("/{profile_id}/controls.html", response_class=HTMLResponse)
+def controls_html(profile_id: int, db: Session = Depends(get_session)):
+    """Control table: every control down the side, every mode across the top."""
+    p = _get(db, profile_id)
+    return HTMLResponse(render_controls(config_from_profile(p), actions_for_profile(db, p)))

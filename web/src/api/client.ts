@@ -193,6 +193,9 @@ export const api = {
   /** The compact three-column cheat sheet: game action | QuadStick | console button. */
   summaryUrl: (id: number) => `${API_BASE}/profiles/${id}/summary.html`,
 
+  /** Every control down the side, every mode across the top (after QCM's reference sheet). */
+  controlsUrl: (id: number) => `${API_BASE}/profiles/${id}/controls.html`,
+
   // ---------------------------------------------------------------- global prefs
   /**
    * The device's own settings (prefs.csv), underneath every profile. Which
