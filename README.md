@@ -114,16 +114,31 @@ file on the device.
 ### Back up the QuadStick first
 
 Before you change anything on the QuadStick, save a copy of everything on it. Plug it
-in, press **Back up the QuadStick** on the Profiles page, and pick its drive. Every file
-is saved inside the app with the date and time.
+in, press **Back up the QuadStick** at the top of **The device** page, and pick its drive.
+Every file is saved inside the app with the date and time.
 
-![The backup box on the Profiles page](docs/screenshots/14-backup.webp)
+![The backup box on the device page](docs/screenshots/14-backup.webp)
 
 If something goes wrong later, press **Restore a backup…**, pick the date, and save it as
 one `.zip`. Copy the files inside onto the QuadStick, unplug it, plug it back in, and it
 is back the way it was. The app tells you each step.
 
 ![Restoring a backup](docs/screenshots/15-restore.webp)
+
+### See what is on the QuadStick
+
+Under the backup box, **On the QuadStick** lists the profiles on the drive, in the order
+the QuadStick counts them: `default.csv` first, then A to Z. Next to each is its number
+and the five status lights that pick it. To load one: long hard sip on the side tube,
+move the joystick until the lights match, then press the lip.
+
+In the **desktop app** this is live: plug the QuadStick in and the list shows exactly
+what is on it. The app finds the drive by its name ("Quad Stick" or "QuadStick") and
+remembers it; if yours has another name, press **Choose the drive…** once. **Back up
+the QuadStick** then reads the drive straight away, with no folder to pick. On a NAS
+the app cannot see your computer's drives, so the list shows your newest backup.
+
+![The profiles on the QuadStick, with their lights](docs/screenshots/16-on-device.webp)
 
 ### Test your QuadStick
 
@@ -173,8 +188,8 @@ table per mode to tape next to the monitor:
 
 ### The QuadStick's own settings
 
-Import, edit and export the device's `prefs.csv`: all 61 settings, grouped and
-searchable, with the fiddly ones folded away and the right control for each. It says
+Further down **The device** page: import, edit and export the device's `prefs.csv`:
+all 61 settings, grouped and searchable, with the fiddly ones folded away and the right control for each. It says
 plainly which one wins: the device, then the profile, then the mode.
 
 ![Device settings](docs/screenshots/07-device-settings.webp)

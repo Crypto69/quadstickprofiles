@@ -74,7 +74,7 @@ whichever way you run the app:
 The page gives you the small `qstest.csv` profile it needs, with the steps to copy it
 onto the QuadStick.
 
-Backing up the QuadStick's drive (the **QuadStick backup** box on the Profiles page)
+Backing up the QuadStick's drive (the **QuadStick backup** box on The device page)
 works in any browser and over plain `http://`.
 
 ## From source

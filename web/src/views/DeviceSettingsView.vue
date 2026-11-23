@@ -1,12 +1,15 @@
 <script setup lang="ts">
 /**
- * The QuadStick's own settings — its `prefs.csv`. These apply to every profile,
- * so this page explains the precedence up front and is honest that the file has to
- * be copied across by hand like any other.
+ * The device page. First the drive: back it up or restore it, and what the newest
+ * backup says is on it. Then the QuadStick's own settings — its `prefs.csv`. These
+ * apply to every profile, so the page explains the precedence up front and is honest
+ * that the file has to be copied across by hand like any other.
  */
 import { computed, onMounted, ref } from 'vue'
 import { RouterLink } from 'vue-router'
 import BottomBar from '@/components/BottomBar.vue'
+import DeviceProfiles from '@/components/DeviceProfiles.vue'
+import DriveBackups from '@/components/DriveBackups.vue'
 import FindingsList from '@/components/FindingsList.vue'
 import ModalDialog from '@/components/ModalDialog.vue'
 import PreferencesEditor from '@/components/PreferencesEditor.vue'
@@ -72,9 +75,15 @@ async function doExport() {
 
 <template>
   <div class="stack">
+    <h1 class="page-title">The QuadStick</h1>
+
+    <DriveBackups />
+
+    <DeviceProfiles />
+
     <header class="head">
       <div>
-        <h1>The QuadStick's own settings</h1>
+        <h2>The QuadStick's own settings</h2>
         <p class="lede">
           These apply whatever profile is loaded. A profile can set its own value for any
           of them, and that wins while it is loaded.
@@ -227,8 +236,11 @@ async function doExport() {
   gap: var(--sp-3);
   flex-wrap: wrap;
 }
-.head h1 {
-  margin: 0 0 var(--sp-1);
+.page-title {
+  margin: 0;
+}
+.head h2 {
+  margin: var(--sp-3) 0 var(--sp-1);
 }
 .lede {
   margin: 0;

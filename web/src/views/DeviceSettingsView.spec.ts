@@ -18,6 +18,7 @@ async function page(routes: Record<string, unknown> = {}) {
       '/api/catalog': catalog(),
       // the page judges the settings against the owner's firmware, so every call says which
       '/api/prefs?firmware=2373': prefs({ volume: '40' }),
+      '/api/backups': [],
       ...routes,
     }),
   )
@@ -37,6 +38,34 @@ describe('DeviceSettingsView', () => {
   })
   afterEach(() => {
     document.body.innerHTML = ''
+  })
+
+  it('puts the backup and what is on the drive above the settings', async () => {
+    const w = await page({
+      '/api/backups': [
+        {
+          id: 1,
+          created_at: '2026-11-22T10:30:00+00:00',
+          file_count: 3,
+          total_bytes: 3072,
+          files: [
+            { path: 'prefs.csv', size: 1024 },
+            { path: 'fortnite.csv', size: 1024 },
+            { path: 'default.csv', size: 1024 },
+          ],
+        },
+      ],
+    })
+    const headings = w.findAll('h2').map((h) => h.text())
+    expect(headings.slice(0, 3)).toEqual([
+      'QuadStick backup',
+      'On the QuadStick',
+      "The QuadStick's own settings",
+    ])
+    expect(w.findAll('.on-device tbody td.name').map((d) => d.text())).toEqual([
+      'default.csv',
+      'fortnite.csv',
+    ])
   })
 
   it('states the precedence, device first', async () => {
@@ -167,6 +196,6 @@ describe('DeviceSettingsView', () => {
 
   it('takes only a .csv', async () => {
     const w = await page()
-    expect(w.find('input[type="file"]').attributes('accept')).toBe('.csv')
+    expect(w.find('input[aria-label="Choose a prefs.csv to import"]').attributes('accept')).toBe('.csv')
   })
 })

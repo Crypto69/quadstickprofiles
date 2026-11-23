@@ -1,8 +1,8 @@
 <script setup lang="ts">
-// Backing up and restoring the QuadStick's flash drive, from the Profiles page.
+// Backing up and restoring the QuadStick's flash drive, at the top of the device page.
 //
-// Back up: one button, then pick the drive. Every file on it is stored, byte for byte,
-// under the time it was taken. Restore: pick a backup, get it back as one .zip, copy
+// Back up: one button, then pick the drive (the desktop app finds it by itself). Every
+// file on it is stored, byte for byte, under the time it was taken. Restore: pick a backup, get it back as one .zip, copy
 // the files onto the drive. The copy onto the device stays manual, like every export.
 import { computed, onMounted, ref } from 'vue'
 import ModalDialog from './ModalDialog.vue'
@@ -10,36 +10,27 @@ import type { Download } from '@/api/client'
 import { api } from '@/api/client'
 import type { Backup } from '@/api/types'
 import { saveBlob } from '@/composables/useDownload'
-import { desktopApi, isDesktop } from '@/desktop'
+import { isDesktop } from '@/desktop'
 import type { DriveFile } from '@/lib/driveFiles'
-import {
-  backupWhen, backupZipName, filesFromDesktop, filesFromFolderPicker, sizeLabel,
-} from '@/lib/driveFiles'
+import { backupWhen, backupZipName, filesFromFolderPicker, sizeLabel } from '@/lib/driveFiles'
+import { useBackupsStore } from '@/stores/backups'
+import { shellMessage as say, useDriveStore } from '@/stores/drive'
 
-const backups = ref<Backup[]>([])
+const store = useBackupsStore()
+const drive = useDriveStore()
+const backups = computed(() => store.backups)
 const error = ref('')
 const busy = ref(false)
 /** The backup just taken, so the page can say it worked and when. */
 const justSaved = ref<Backup | null>(null)
 
-const latest = computed(() => backups.value[0] ?? null)
+const latest = computed(() => store.latest)
 const desktop = isDesktop()
 
-/** pywebview rejects with a plain {message} object rather than an Error. */
-function say(e: unknown): string {
-  if (e instanceof Error) return e.message
-  const m = (e as { message?: unknown } | null)?.message
-  return typeof m === 'string' ? m : String(e)
-}
-
-async function load() {
-  try {
-    backups.value = await api.listBackups()
-  } catch (e) {
-    error.value = say(e)
-  }
-}
-onMounted(load)
+onMounted(async () => {
+  await store.load()
+  error.value = store.error
+})
 
 // ------------------------------------------------------------------ back up
 const folderInput = ref<HTMLInputElement | null>(null)
@@ -48,14 +39,21 @@ async function startBackup() {
   if (busy.value) return
   error.value = ''
   justSaved.value = null
-  // A WebView's file input cannot pick a folder, so the desktop shell reads it.
-  const shell = desktopApi()
-  if (shell?.pick_drive_files) {
+  // The desktop app reads the drive itself, by name. Only when it cannot find one
+  // does it ask which drive it is, and then remembers that name.
+  if (drive.live) {
+    busy.value = true
     try {
-      const entries = await shell.pick_drive_files()
-      if (entries) await save(filesFromDesktop(entries))
+      let files = await drive.read()
+      if (!files) {
+        if (!(await drive.choose())) return
+        files = await drive.read()
+      }
+      if (files) await save(files)
     } catch (e) {
       error.value = say(e)
+    } finally {
+      busy.value = false
     }
     return
   }
@@ -77,7 +75,7 @@ async function save(files: DriveFile[]) {
   busy.value = true
   try {
     const b = await api.createBackup(files)
-    backups.value = [b, ...backups.value]
+    store.added(b)
     justSaved.value = b
   } catch (e) {
     error.value = say(e)
@@ -132,7 +130,7 @@ async function deleteChosen() {
   restoreError.value = ''
   try {
     await api.deleteBackup(b.id)
-    backups.value = backups.value.filter((x) => x.id !== b.id)
+    store.removed(b.id)
     if (justSaved.value?.id === b.id) justSaved.value = null
     confirmingDelete.value = false
     downloaded.value = null
@@ -161,7 +159,12 @@ function fileCount(b: Backup) {
         Last backed up <b>{{ backupWhen(latest.created_at) }}</b> ({{ fileCount(latest) }}).
       </p>
       <p v-else>Not backed up yet.</p>
-      <p class="hint">
+      <p v-if="drive.live" class="hint">
+        Plug in the QuadStick and press Back up. The app reads the drive
+        <b>{{ drive.state?.name ?? 'QuadStick' }}</b> itself. Every file on it is saved here with
+        the date, so you can put the drive back exactly as it was.
+      </p>
+      <p v-else class="hint">
         Plug in the QuadStick, then choose its drive when asked. Every file on it is saved here
         with the date, so you can put the drive back exactly as it was.
         <template v-if="!desktop">Your browser asks before it sends the files — only to this app.</template>

@@ -202,7 +202,7 @@ def main(argv=None) -> int:
         except KeyboardInterrupt:
             pass
     else:
-        open_window(f"{origin}/", DesktopApi(exports, origin), data / "webview")
+        open_window(f"{origin}/", DesktopApi(exports, origin, data), data / "webview")
 
     log.info("window closed; stopping the server")
     server.should_exit = True

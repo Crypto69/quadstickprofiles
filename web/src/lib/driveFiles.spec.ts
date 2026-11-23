@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
-  backupZipName, filesFromDesktop, filesFromFolderPicker, isSystemPath, sizeLabel,
+  backupZipName, filesFromDesktop, filesFromFolderPicker, isSystemPath, profilesOnDrive, sizeLabel,
 } from './driveFiles'
 
 function picked(relativePath: string, body = 'x'): File {
@@ -46,5 +46,25 @@ describe('driveFiles', () => {
   it('says sizes in words a person reads', () => {
     expect(sizeLabel(900)).toBe('900 bytes')
     expect(sizeLabel(1536)).toBe('1.5 KB')
+  })
+
+  describe('profilesOnDrive', () => {
+    it('puts default.csv first, then the rest in order, lowercased like the device', () => {
+      expect(profilesOnDrive(['zelda.csv', 'Fortnite.CSV', 'default.csv', 'apex.csv'])).toEqual([
+        'default.csv', 'apex.csv', 'fortnite.csv', 'zelda.csv',
+      ])
+    })
+
+    it('leaves out prefs.csv, other files, folders and dot-files', () => {
+      expect(
+        profilesOnDrive([
+          'prefs.csv', 'joystick.bin', 'old/backup.csv', '._game.csv', 'notes.txt', 'game.csv',
+        ]),
+      ).toEqual(['game.csv'])
+    })
+
+    it('still numbers the profiles when there is no default.csv', () => {
+      expect(profilesOnDrive(['b.csv', 'a.csv'])).toEqual(['a.csv', 'b.csv'])
+    })
   })
 })

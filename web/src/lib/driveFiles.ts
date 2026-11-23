@@ -69,3 +69,22 @@ export function sizeLabel(bytes: number): string {
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 }
+
+/**
+ * The profiles on the drive in the order the QuadStick counts them when you pick a
+ * file with the joystick: `default.csv` is always file 1, then every other top-level
+ * `.csv` in alphanumeric order (docs/research-report.md §2). `prefs.csv` holds the
+ * device's settings, not a profile, so it has no number. The device lowercases names,
+ * so they are shown and sorted that way. Folders and dot-files are not read.
+ */
+export function profilesOnDrive(paths: Iterable<string>): string[] {
+  const names = new Set<string>()
+  for (const path of paths) {
+    const name = path.toLowerCase()
+    if (name.includes('/') || name.startsWith('.') || !name.endsWith('.csv')) continue
+    if (name === 'prefs.csv') continue
+    names.add(name)
+  }
+  const rest = [...names].filter((n) => n !== 'default.csv').sort((a, b) => (a < b ? -1 : a > b ? 1 : 0))
+  return names.has('default.csv') ? ['default.csv', ...rest] : rest
+}

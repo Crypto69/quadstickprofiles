@@ -1,4 +1,5 @@
 import { mount } from '@vue/test-utils'
+import { createPinia, setActivePinia } from 'pinia'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import DriveBackups from './DriveBackups.vue'
 import type { Backup } from '@/api/types'
@@ -37,6 +38,7 @@ function picked(relativePath: string): File {
 
 describe('DriveBackups', () => {
   beforeEach(() => {
+    setActivePinia(createPinia())
     vi.unstubAllGlobals()
     delete window.pywebview
     document.body.innerHTML = ''
@@ -109,18 +111,66 @@ describe('DriveBackups', () => {
     w.unmount()
   })
 
-  it('in the desktop build asks the shell for the folder instead', async () => {
-    const pick = vi.fn(async () => [{ path: 'default.csv', data: btoa('QuadStick') }])
-    window.pywebview = { api: { reveal: vi.fn(), open_external: vi.fn(), pick_drive_files: pick } }
+  function desktop(over: Record<string, unknown> = {}) {
+    const shell = {
+      reveal: vi.fn(),
+      open_external: vi.fn(),
+      quadstick_drive: vi.fn(async () => ({ found: true, name: 'Quad Stick', files: [] })),
+      read_quadstick_drive: vi.fn(async () => [{ path: 'default.csv', data: btoa('QuadStick') }]),
+      choose_quadstick_drive: vi.fn(async () => null),
+      ...over,
+    }
+    window.pywebview = { api: shell }
+    return shell
+  }
+
+  it('in the desktop build reads the drive itself, with no folder dialog', async () => {
+    const shell = desktop()
     const fetch = stubFetch({ '/api/backups': [], 'POST /api/backups': backup({ id: 3, file_count: 1 }) })
     vi.stubGlobal('fetch', fetch)
     const w = mount(DriveBackups, { attachTo: document.body })
     await settle()
     button('Back up the QuadStick')!.click()
     await settle()
-    expect(pick).toHaveBeenCalled()
+    expect(shell.read_quadstick_drive).toHaveBeenCalled()
+    expect(shell.choose_quadstick_drive).not.toHaveBeenCalled()
     const [, init] = fetch.mock.calls.find(([, i]) => i?.method === 'POST')!
     expect((init!.body as FormData).getAll('paths')).toEqual(['default.csv'])
+    expect(w.text()).toContain('Backed up 1 file')
+    w.unmount()
+  })
+
+  it('in the desktop build asks which drive only when it cannot find one', async () => {
+    const read = vi
+      .fn()
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce([{ path: 'default.csv', data: btoa('QuadStick') }])
+    const shell = desktop({
+      read_quadstick_drive: read,
+      choose_quadstick_drive: vi.fn(async () => ({ found: true, name: 'QS', files: [] })),
+    })
+    const fetch = stubFetch({ '/api/backups': [], 'POST /api/backups': backup({ id: 3, file_count: 1 }) })
+    vi.stubGlobal('fetch', fetch)
+    const w = mount(DriveBackups, { attachTo: document.body })
+    await settle()
+    button('Back up the QuadStick')!.click()
+    await settle()
+    expect(shell.choose_quadstick_drive).toHaveBeenCalled()
+    expect(read).toHaveBeenCalledTimes(2)
+    expect(fetch.mock.calls.some(([, i]) => i?.method === 'POST')).toBe(true)
+    w.unmount()
+  })
+
+  it('in the desktop build backs up nothing when the drive dialog is cancelled', async () => {
+    desktop({ read_quadstick_drive: vi.fn(async () => null) })
+    const fetch = stubFetch({ '/api/backups': [] })
+    vi.stubGlobal('fetch', fetch)
+    const w = mount(DriveBackups, { attachTo: document.body })
+    await settle()
+    button('Back up the QuadStick')!.click()
+    await settle()
+    expect(fetch.mock.calls.some(([, i]) => i?.method === 'POST')).toBe(false)
+    expect(button('Back up the QuadStick')!.disabled).toBe(false)
     w.unmount()
   })
 
