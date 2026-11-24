@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
-  backupZipName, filesFromDesktop, filesFromFolderPicker, isSystemPath, profilesOnDrive, sizeLabel,
-  skippedByTheSwitch,
+  backupZipName, blobToBase64, filesFromDesktop, filesFromFolderPicker, isSystemPath, planReplace,
+  profilesOnDrive, sizeLabel, skippedByTheSwitch,
 } from './driveFiles'
 
 function picked(relativePath: string, body = 'x'): File {
@@ -82,5 +82,44 @@ describe('driveFiles', () => {
       expect(skippedByTheSwitch(drive)).toEqual(['myprefs.csv', 'old_prefs.csv'])
       expect(skippedByTheSwitch(['prefs.csv', 'cod.csv', 'sub/myprefs.csv'])).toEqual([])
     })
+  })
+
+  describe('planReplace', () => {
+    const drive = ['default.csv', 'cod.csv', 'zelda.csv', 'prefs.csv', 'myprefs.csv', 'joystick.bin']
+
+    it('puts the ticked profiles on in device order and names the ones that go', () => {
+      const plan = planReplace(drive, ['Apex.csv', 'default.csv', 'cod.csv'])
+      expect(plan).toEqual({
+        after: ['default.csv', 'apex.csv', 'cod.csv'],
+        removed: ['zelda.csv'],
+        keptDefault: false,
+        problems: [],
+      })
+    })
+
+    it("keeps the drive's own default.csv when no ticked profile is one", () => {
+      const plan = planReplace(drive, ['apex.csv'])
+      expect(plan.after).toEqual(['default.csv', 'apex.csv'])
+      expect(plan.keptDefault).toBe(true)
+      expect(plan.removed).toEqual(['cod.csv', 'zelda.csv'])
+      expect(planReplace(['cod.csv'], ['apex.csv']).keptDefault).toBe(false)
+    })
+
+    it('says what stops the write', () => {
+      expect(planReplace(drive, []).problems).toEqual(['Tick at least one profile.'])
+      expect(planReplace(drive, ['cod.csv', 'COD.csv']).problems[0]).toContain('Two ticked profiles are called cod.csv')
+      expect(planReplace(drive, ['old_prefs.csv']).problems[0]).toContain('prefs.csv in its name')
+      const many = Array.from({ length: 32 }, (_, i) => `p${i}.csv`)
+      expect(planReplace(['x.csv'], many).problems).toEqual([])
+      expect(planReplace(drive, many).problems[0]).toContain('33 profiles with default.csv')
+    })
+  })
+
+  it('turns bytes into base64 for the desktop shell', async () => {
+    const bytes = new Uint8Array(70000).map((_, i) => i % 256)
+    // a Blob as fetch hands it back (jsdom's own Blob has no arrayBuffer)
+    const back = atob(await blobToBase64(await new Response(bytes).blob()))
+    expect(back.length).toBe(70000)
+    expect([...back.slice(250, 260)].map((c) => c.charCodeAt(0))).toEqual([250, 251, 252, 253, 254, 255, 0, 1, 2, 3])
   })
 })

@@ -107,3 +107,61 @@ export function profilesOnDrive(paths: Iterable<string>): string[] {
 export function skippedByTheSwitch(paths: Iterable<string>): string[] {
   return [...topLevelCsv(paths)].filter((n) => isPrefsName(n) && n !== 'prefs.csv').sort()
 }
+
+// ------------------------------------------------------------- replacing the profiles
+// The desktop app can put profiles on the drive in place of the ones there now
+// (`replace_profiles` in desktop/desktop_api.py). The shell checks everything again;
+// this is the same rule, so the page can show the result before anything is written.
+
+/** The profile switch reaches this many files (MAX_SELECTABLE_FILES in device/layout.ts). */
+const MAX_PROFILE_FILES = 32
+
+export interface ReplacePlan {
+  /** What the drive's profile list will be, in the QuadStick's order. */
+  after: string[]
+  /** Profiles on the drive now that go (lowercased). They are in the backup. */
+  removed: string[]
+  /** No new profile is default.csv, so the drive's own one stays. */
+  keptDefault: boolean
+  /** Why it cannot be written as it stands. Empty when it can. */
+  problems: string[]
+}
+
+/**
+ * What a replace does to the drive. `onDrive` is every path on it now; `chosen` the
+ * filenames of the profiles to put on it. Only the profile files swap: prefs.csv,
+ * joystick.bin, folders and a name with `prefs.csv` in it stay as they are. When no
+ * chosen profile is `default.csv`, the drive's own one stays: it is the profile the
+ * QuadStick boots with.
+ */
+export function planReplace(onDrive: Iterable<string>, chosen: string[]): ReplacePlan {
+  const now = profilesOnDrive(onDrive)
+  const names = chosen.map((n) => n.toLowerCase())
+  const keptDefault = !names.includes('default.csv') && now.includes('default.csv')
+  const problems: string[] = []
+  if (names.length === 0) problems.push('Tick at least one profile.')
+  const twice = [...new Set(names.filter((n, i) => names.indexOf(n) !== i))]
+  for (const n of twice) problems.push(`Two ticked profiles are called ${n}. Untick one of them.`)
+  for (const n of names.filter(isPrefsName)) {
+    problems.push(`${n} has prefs.csv in its name, so the QuadStick would never offer it.`)
+  }
+  const after = profilesOnDrive(keptDefault ? ['default.csv', ...names] : names)
+  if (after.length > MAX_PROFILE_FILES) {
+    problems.push(
+      `That is ${after.length} profiles${keptDefault ? ' with default.csv' : ''}; the ` +
+        `QuadStick can pick only ${MAX_PROFILE_FILES}. Untick some.`,
+    )
+  }
+  const removed = now.filter((n) => !after.includes(n))
+  return { after, removed, keptDefault, problems }
+}
+
+/** A blob as base64, for the desktop shell: pywebview passes only JSON. */
+export async function blobToBase64(blob: Blob): Promise<string> {
+  const bytes = new Uint8Array(await blob.arrayBuffer())
+  let bin = ''
+  for (let i = 0; i < bytes.length; i += 0x8000) {
+    bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000))
+  }
+  return btoa(bin)
+}

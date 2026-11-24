@@ -18,8 +18,9 @@ app talks only to itself, on your own computer.
 
 **The QuadStick.** The app reads the QuadStick's flash drive to list and back up the
 files on it, and the tester reads what the QuadStick reports over USB so it can show
-it on screen. Both stay on your computer. The app never changes anything on the
-QuadStick.
+it on screen. Both stay on your computer. The app writes to the QuadStick's drive
+only when you press "Put my profiles on the QuadStick", and it backs the drive up on
+your computer first.
 
 **Removing your data.** Deleting the app's data folder removes everything it has
 saved.

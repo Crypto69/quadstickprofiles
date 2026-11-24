@@ -17,6 +17,12 @@ export interface DesktopApi {
   read_quadstick_drive?(): Promise<{ path: string; data: string }[] | null>
   /** Ask which drive is the QuadStick and remember its name. `null` when cancelled. */
   choose_quadstick_drive?(): Promise<DriveState | null>
+  /**
+   * Put these profiles (`data` base64) on the drive in place of the ones there now,
+   * and flush. Answers with what is on the drive after. Rejects with a message when
+   * it refuses or the drive is not plugged in. The only call that writes to the drive.
+   */
+  write_quadstick_drive?(files: { name: string; data: string }[]): Promise<DriveState>
 }
 
 export interface DriveState {

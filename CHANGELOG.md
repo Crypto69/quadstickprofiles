@@ -3,6 +3,32 @@
 Each release, in plain words. The newest is first. The part for a version is also
 shown at the top of its page on GitHub.
 
+## 1.20 — 24 November 2026
+
+### Put your profiles on the QuadStick, in one step
+
+In the Mac and Windows apps you no longer have to copy files onto the QuadStick by
+hand.
+
+Plug in the QuadStick and open **The device** page. Press **Put my profiles on the
+QuadStick…**. Tick the profiles you want. The app shows you the new list, numbered in
+the QuadStick's own order, with the lights that pick each one. Then press the blue
+button, **Back up, then put … on**.
+
+The app saves a backup of the whole drive first. Then it writes your profiles. When it
+says **Done**, it is safe to unplug. Unplug the QuadStick and plug it back in, and your
+profiles are there.
+
+- Your ticked profiles take the place of the ones on the drive. The old ones stay in
+  the backup, so **Restore a backup…** can put them back.
+- The QuadStick's own settings (`prefs.csv`) are not touched.
+- If you don't tick a `default.csv`, the drive keeps the one it has. That is the
+  profile the QuadStick starts with.
+- A profile with mistakes can't go on until it is fixed.
+
+This is only in the desktop apps. A web browser, and so the NAS version, can't write
+to a USB drive, so there you still export and copy as before.
+
 ## 1.16 — 23 November 2026
 
 ### A new way to print: the control table

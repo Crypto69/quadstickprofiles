@@ -55,5 +55,16 @@ export const useDriveStore = defineStore('drive', () => {
     return entries ? filesFromDesktop(entries) : null
   }
 
-  return { state, error, live, found, refresh, choose, read }
+  /** This copy can write to the drive. */
+  const writable = computed(() => Boolean(desktopApi()?.write_quadstick_drive))
+
+  /** Put these profiles on the drive in place of the ones there. Throws what the shell refused. */
+  async function write(files: { name: string; data: string }[]) {
+    const shell = desktopApi()
+    if (!shell?.write_quadstick_drive) throw new Error('Only the desktop app can write to the drive.')
+    state.value = await shell.write_quadstick_drive(files)
+    error.value = ''
+  }
+
+  return { state, error, live, found, writable, refresh, choose, read, write }
 })

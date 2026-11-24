@@ -9,8 +9,10 @@ Three ways to run the same app. Pick the row that matches what you have.
 | a NAS you administer | `docs/DEPLOY-NAS.md` | the NAS |
 
 Profiles move between any of them as `.xlsx` / `.csv` files: export from one, import
-into the other. Copying a `.csv` onto the QuadStick's flash drive stays manual on
-purpose; the app walks you through it after every export.
+into the other. The desktop app can put profiles straight onto the QuadStick's flash
+drive (**Put my profiles on the QuadStick…** on The device page), backing the drive up
+first. Everywhere else, copying a `.csv` onto the drive stays manual; the app walks you
+through it after every export.
 
 ## Desktop app (no Docker)
 

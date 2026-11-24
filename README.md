@@ -107,7 +107,8 @@ the mode and view where it lives.
 Export a `.csv` in the exact format the official add-on produces, each mode under the
 name you see in the editor — then a
 five-step checklist you can tick off, including the LED counting rule for picking the
-file on the device.
+file on the device. In the **desktop app** you can skip the copying: see "Put your
+profiles on the QuadStick" below.
 
 ![The export checklist](docs/screenshots/11-export-checklist.webp)
 
@@ -139,6 +140,40 @@ the QuadStick** then reads the drive straight away, with no folder to pick. On a
 the app cannot see your computer's drives, so the list shows your newest backup.
 
 ![The profiles on the QuadStick, with their lights](docs/screenshots/16-on-device.webp)
+
+### Put your profiles on the QuadStick (desktop app)
+
+In the Mac and Windows apps you don't have to copy files by hand. Plug in the
+QuadStick, open **The device** page, and press **Put my profiles on the QuadStick…**
+in the **On the QuadStick** box.
+
+1. **Tick the profiles you want on the QuadStick.** Every profile from the Profiles
+   page is listed. A profile with errors can't be ticked; the list says so and links to
+   it, so you can fix it.
+2. **Check "The QuadStick after".** It shows the new list in the order the QuadStick
+   counts it, with the lights that pick each profile, and which old profiles come off.
+3. **Press Back up, then put … on.** The app backs up the whole drive first, then
+   writes the profiles. When it says **Done**, it is safe to unplug.
+4. **Unplug the QuadStick and plug it back in.** It only reads its drive when it
+   powers on.
+
+![Choosing the profiles to put on the QuadStick](docs/screenshots/17-put-on-quadstick.webp)
+
+Good to know:
+
+- The ticked profiles **take the place of** the profiles on the drive now. The old ones
+  are kept in the backup, so **Restore a backup…** puts the drive back as it was.
+- Only profiles change. `prefs.csv` (the QuadStick's own settings), `joystick.bin` and
+  any folders stay as they are.
+- If none of your ticked profiles is called `default.csv`, the drive keeps its own
+  `default.csv`. That is the profile the QuadStick starts with.
+- The QuadStick can pick up to 32 profiles, so the app stops you at 32.
+- If the drive is full or gets unplugged too soon, the app says so. If it stops before
+  it removes anything, the drive is left exactly as it was.
+- On a NAS, or in a browser, this button isn't there. A web page can't write to a USB
+  drive, so export the `.csv` and copy it across as before.
+
+![Done, and safe to unplug](docs/screenshots/18-put-on-done.webp)
 
 ### Test your QuadStick
 

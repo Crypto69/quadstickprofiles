@@ -10,8 +10,14 @@ plugged in. It finds the drive by its name ("Quad Stick" as macOS shows it,
 `drive.json`, and lists or reads it without a folder dialog. Only when it cannot find
 one does it ask, and then it remembers the name of the drive that was picked. A
 WebView's file input could not do that part either: pywebview answers
-`<input webkitdirectory>` with a file panel. Nothing here ever writes to the drive."""
+`<input webkitdirectory>` with a file panel.
+
+One call writes to the drive: `write_quadstick_drive` puts a set of profiles on it in
+place of the ones there now (`replace_profiles`). The web page backs the drive up
+first; this side checks every name again, writes the new files before it removes
+anything, and flushes before it answers, so "done" means safe to unplug."""
 import base64
+import errno
 import json
 import logging
 import os
@@ -19,6 +25,8 @@ import re
 import subprocess
 import webbrowser
 from pathlib import Path
+
+from qsprofile.catalog import check_csv_filename
 
 from host_os import IS_MAC, IS_WINDOWS
 
@@ -73,6 +81,133 @@ def read_drive(folder: Path) -> list[dict]:
 def list_drive(folder: Path) -> list[dict]:
     """Every file under `folder` as {path, size}: names only, nothing read."""
     return [{"path": rel, "size": p.stat().st_size} for rel, p in _drive_files(folder)]
+
+
+# ------------------------------------------------------------------ writing profiles
+# The profile switch reaches 32 files (MAX_SELECTABLE_FILES in web/src/device/layout.ts).
+MAX_PROFILE_FILES = 32
+# A profile is a few KB; this only stops something that is plainly not one.
+MAX_PROFILE_BYTES = 1024 * 1024
+TEMP_PREFIX = ".qsps-"     # a dot-file: the firmware deletes any left behind at boot
+
+
+class NotWritten(ValueError):
+    """Refused before anything on the drive was touched."""
+
+
+def is_profile_name(name: str) -> bool:
+    """A file the QuadStick offers on its profile switch: a top-level `.csv` that is
+    not a dot-file and has no `prefs.csv` in its name (the firmware's `scan_files`;
+    `profilesOnDrive` in web/src/lib/driveFiles.ts). These are what a replace swaps."""
+    low = name.lower()
+    return low.endswith(".csv") and not low.startswith(".") and "prefs.csv" not in low
+
+
+def check_profiles(files: dict[str, bytes]) -> None:
+    """Raise NotWritten unless every file is a profile the QuadStick will load under
+    that name, and the set is one it can switch between."""
+    if not files:
+        raise NotWritten("Pick at least one profile to put on the QuadStick.")
+    seen: set[str] = set()
+    for name, data in files.items():
+        if problem := check_csv_filename(name):     # also refuses / \ and a leading dot
+            raise NotWritten(f"Not written: {problem}.")
+        if not is_profile_name(name):
+            raise NotWritten(f"'{name}' has prefs.csv in its name, so the QuadStick would never "
+                             "offer it. Rename the profile.")
+        if name.lower() in seen:     # FAT: two names that differ only in case are one file
+            raise NotWritten(f"Two profiles are called {name.lower()}. Leave one of them out.")
+        seen.add(name.lower())
+        if len(data) > MAX_PROFILE_BYTES or not data.startswith(b"QuadStick"):
+            raise NotWritten(f"{name} is not a QuadStick profile.")
+    if len(files) > MAX_PROFILE_FILES:
+        raise NotWritten(f"That is {len(files)} profiles; the QuadStick can pick only "
+                         f"{MAX_PROFILE_FILES}. Leave some out.")
+
+
+def _write_synced(path: Path, data: bytes) -> None:
+    with open(path, "wb") as f:
+        f.write(data)
+        f.flush()
+        os.fsync(f.fileno())
+        if IS_MAC:                   # fsync alone leaves it in the drive's own cache
+            import fcntl
+            try:
+                fcntl.fcntl(f.fileno(), fcntl.F_FULLFSYNC)
+            except OSError:
+                pass
+
+
+def _flush_folder(root: Path) -> None:
+    """Get the renames and deletions out of the computer's cache onto the stick.
+    macOS and Linux hold FAT writes back for up to ~30 s otherwise."""
+    if IS_WINDOWS:
+        return                       # each file was flushed; removable drives write through
+    try:
+        fd = os.open(root, os.O_RDONLY)
+        try:
+            os.fsync(fd)
+        finally:
+            os.close(fd)
+    except OSError:
+        pass
+    os.sync()
+
+
+def replace_profiles(root: Path, files: dict[str, bytes]) -> dict:
+    """Put `files` ({name: bytes}) on the drive at `root` in place of the profiles there
+    now. Everything else (prefs.csv, joystick.bin, folders) is left alone. When no new
+    file is `default.csv`, the drive's own `default.csv` stays: it is the profile the
+    QuadStick boots with.
+
+    Order matters for a stick that is pulled out or full: the new files are written and
+    flushed under temporary dot-names first, so a failure there leaves the drive as it
+    was. Only then are the old profiles removed and the new ones renamed into place.
+    Answers {written, removed, kept_default}."""
+    root = Path(root)
+    check_profiles(files)
+    keep_default = "default.csv" not in {n.lower() for n in files}
+    old = sorted(p for p in root.iterdir()
+                 if is_profile_name(p.name) and p.is_file() and not p.is_symlink()
+                 and not (keep_default and p.name.lower() == "default.csv"))
+    kept_default = keep_default and (root / "default.csv").is_file()
+    if kept_default and len(files) + 1 > MAX_PROFILE_FILES:
+        raise NotWritten(f"With default.csv that is {len(files) + 1} profiles; the QuadStick "
+                         f"can pick only {MAX_PROFILE_FILES}. Leave some out.")
+
+    temps: dict[str, Path] = {}
+    try:
+        for i, (name, data) in enumerate(files.items()):
+            tmp = root / f"{TEMP_PREFIX}{i}.tmp"
+            temps[name] = tmp
+            _write_synced(tmp, data)
+    except OSError as e:
+        for tmp in temps.values():
+            tmp.unlink(missing_ok=True)
+        if e.errno == errno.ENOSPC:
+            raise NotWritten("There is not enough room on the QuadStick drive. Nothing was "
+                             "changed.") from e
+        raise NotWritten(f"Could not write to the drive ({e.strerror or e}). Nothing was "
+                         "changed. Unplug the QuadStick, plug it back in, and try again.") from e
+
+    # From here on the drive is changing. Removing every old profile first also clears
+    # a name that differs only in case (FAT keeps the old spelling on a replace).
+    try:
+        for p in old:
+            p.unlink()
+        for name, tmp in temps.items():
+            os.replace(tmp, root / name)
+            # macOS tags every new file (com.apple.provenance) and keeps the tag on FAT
+            # as a `._` file beside it. The firmware deletes dot-files at boot; tidy it now.
+            (root / f"._{name}").unlink(missing_ok=True)
+    finally:
+        for tmp in temps.values():
+            tmp.unlink(missing_ok=True)
+        _flush_folder(root)
+    new = {n.lower() for n in files}
+    return {"written": sorted(files),
+            "removed": [p.name for p in old if p.name.lower() not in new],
+            "kept_default": kept_default}
 
 
 # ------------------------------------------------------------------ finding the drive
@@ -206,6 +341,37 @@ class DesktopApi:
             log.warning("reading %s failed: %s", hit[1], e)
             raise ValueError(f"Could not read the drive {hit[0]}. Unplug the QuadStick, plug it "
                              "back in, and try again.") from e
+
+    def write_quadstick_drive(self, files: list[dict]) -> dict:
+        """Put these profiles ([{name, data}], data base64) on the drive in place of the
+        ones there now (`replace_profiles`), flushed. Answers as `quadstick_drive`. A
+        refusal raises: pywebview rejects the JavaScript promise with the message."""
+        try:
+            decoded = {}
+            for f in files:
+                name = str(f["name"])
+                if name in decoded:
+                    raise NotWritten(f"{name} is in the list twice.")
+                decoded[name] = base64.b64decode(f["data"], validate=True)
+        except (KeyError, TypeError, ValueError) as e:
+            if isinstance(e, NotWritten):
+                raise
+            raise NotWritten("The profiles did not arrive whole. Nothing was changed.") from e
+        hit = self._found()
+        if not hit:
+            raise NotWritten("The QuadStick is not plugged in. Nothing was changed.")
+        name, root = hit
+        log.info("replacing the profiles on %r at %s with %s", name, root, sorted(decoded))
+        try:
+            done = replace_profiles(root, decoded)
+        except NotWritten:
+            raise
+        except OSError as e:
+            log.warning("writing %s failed part way: %s", root, e)
+            raise ValueError(f"Writing to {name} stopped part way ({e.strerror or e}). Restore "
+                             "the backup the app just took if the QuadStick misbehaves.") from e
+        log.info("wrote %s, removed %s", done["written"], done["removed"])
+        return self.quadstick_drive()
 
     def choose_quadstick_drive(self) -> dict | None:
         """Ask which drive is the QuadStick, remember its name, and answer as

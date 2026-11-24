@@ -108,6 +108,11 @@ macOS first, then Windows. Delete nothing between steps unless it says so.
     drive…* takes any drive with a `.csv` on top and is remembered (`drive.json` in the
     data folder). *Restore a backup…* → *Save the backup
     (.zip)* writes the zip to `QuadStick exports` and reveals it.
+    *Put my profiles on the QuadStick…* (enabled only while the drive is found): tick
+    two profiles, press *Back up, then put 2 profiles on*. A new backup appears, the
+    list shows the two (plus the drive's own `default.csv` when neither is one),
+    `prefs.csv` is still on the drive, and after a replug the QuadStick loads them. On
+    macOS, ejecting afterwards gives no "not ejected properly" warning.
 11. *Test it* → *Open the tester in your browser* opens `/tester` in the system browser.
     In Chrome or Edge, with a QuadStick plugged in, *Connect the QuadStick* lists it.
 

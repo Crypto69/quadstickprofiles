@@ -8,7 +8,9 @@
 // so there — and in the desktop app while the QuadStick is unplugged — the list is
 // what the newest backup holds, and says so.
 import { computed, onMounted, onUnmounted, ref } from 'vue'
-import { MAX_SELECTABLE_FILES, fileLedsFor, ledSentence } from '@/device/layout'
+import FileLeds from './FileLeds.vue'
+import ReplaceDrive from './ReplaceDrive.vue'
+import { MAX_SELECTABLE_FILES } from '@/device/layout'
 import { backupWhen, profilesOnDrive, skippedByTheSwitch } from '@/lib/driveFiles'
 import { useBackupsStore } from '@/stores/backups'
 import { shellMessage, useDriveStore } from '@/stores/drive'
@@ -47,12 +49,11 @@ async function chooseDrive() {
 }
 
 const rows = computed(() =>
-  profilesOnDrive(paths.value).map((name, i) => {
-    const n = i + 1
-    const leds = fileLedsFor(n)
-    const reachable = n <= MAX_SELECTABLE_FILES
-    return { n, name, leds, reachable, words: reachable ? ledSentence(leds) : 'the QuadStick cannot pick this file' }
-  }),
+  profilesOnDrive(paths.value).map((name, i) => ({
+    n: i + 1,
+    name,
+    reachable: i + 1 <= MAX_SELECTABLE_FILES,
+  })),
 )
 const skipped = computed(() => skippedByTheSwitch(paths.value))
 </script>
@@ -73,6 +74,7 @@ const skipped = computed(() => skippedByTheSwitch(paths.value))
       <button class="btn btn--small" type="button" @click="chooseDrive">
         {{ drive.found ? 'Use a different drive…' : 'Choose the drive…' }}
       </button>
+      <ReplaceDrive v-if="drive.writable" />
     </div>
     <p v-if="chooseError || drive.error" class="banner banner--error" role="alert">
       {{ chooseError || drive.error }}
@@ -120,15 +122,7 @@ const skipped = computed(() => skippedByTheSwitch(paths.value))
           <tr v-for="r in rows" :key="r.name">
             <td class="num">{{ r.n }}</td>
             <td>
-              <span class="leds" :title="r.words">
-                <i
-                  v-for="(c, li) in r.leds"
-                  :key="li"
-                  :class="[c, { on: c !== 'off' }]"
-                  aria-hidden="true"
-                />
-                <span class="sr-only">{{ r.words }}</span>
-              </span>
+              <FileLeds :n="r.n" />
               <small v-if="!r.reachable" class="past">
                 past {{ MAX_SELECTABLE_FILES }}: the QuadStick cannot pick it
               </small>
@@ -204,39 +198,15 @@ const skipped = computed(() => skippedByTheSwitch(paths.value))
   overflow-wrap: anywhere;
 }
 
-/* The five status LEDs, as on the device, lit in the firmware's colours. Same look
-   as the mode rail: a lit dot is filled and ringed, an unlit one is a hollow circle. */
+/* The header's numbers sit over the five lights (FileLeds.vue): same gap, same width. */
 .leds {
   display: inline-flex;
   align-items: center;
   gap: 10px;
 }
-.leds i,
 .led-num {
   width: 16px;
   flex: none;
-}
-.leds i {
-  height: 16px;
-  border-radius: 50%;
-  border: 2px solid var(--ink-soft);
-  background: #fff;
-}
-.leds i.on {
-  background: var(--led);
-  border-color: var(--led);
-  box-shadow: 0 0 0 2px var(--paper), 0 0 0 3px var(--led);
-}
-.leds i.purple {
-  --led: var(--led-purple);
-}
-.leds i.blue {
-  --led: var(--led-blue);
-}
-.leds i.red {
-  --led: var(--led-red);
-}
-.led-num {
   text-align: center;
 }
 .past {
