@@ -1,0 +1,6 @@
+{
+  "_comment": "From Partner Center > the app > Product management > Product identity. Not secret. While these are placeholders, make_msix.ps1 only makes a test package.",
+  "identity_name": "REPLACE_WITH_Package/Identity/Name",
+  "publisher": "REPLACE_WITH_Package/Identity/Publisher",
+  "publisher_display_name": "REPLACE_WITH_Package/Properties/PublisherDisplayName"
+}
