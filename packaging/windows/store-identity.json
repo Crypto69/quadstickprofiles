@@ -1,6 +1,6 @@
 {
-  "_comment": "From Partner Center > the app > Product management > Product identity. Not secret. While these are placeholders, make_msix.ps1 only makes a test package.",
-  "identity_name": "REPLACE_WITH_Package/Identity/Name",
-  "publisher": "REPLACE_WITH_Package/Identity/Publisher",
-  "publisher_display_name": "REPLACE_WITH_Package/Properties/PublisherDisplayName"
+  "_comment": "From Partner Center > the app > Product management > Product identity. Not secret. Store ID 9P7SJPX358H5, package family name ChristianVenter.QuadStickProfileStudio_gwv76hmfms3y2.",
+  "identity_name": "ChristianVenter.QuadStickProfileStudio",
+  "publisher": "CN=A9FDB87E-0797-430A-BD2F-CE93A83762B7",
+  "publisher_display_name": "Christian Venter"
 }

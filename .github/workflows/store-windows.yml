@@ -20,7 +20,9 @@ on:
   push:
     tags: ["v*"]
     # and whenever the packaging itself changes, on any branch, so a change to it is
-    # checked on Windows before it reaches a release
+    # checked on Windows before it reaches a release. `branches` has to be named:
+    # with only `tags` listed, GitHub ignores every branch push.
+    branches: ["**"]
     paths:
       - packaging/windows/**
       - desktop/make_msix.ps1
