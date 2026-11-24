@@ -139,7 +139,7 @@ remembers it; if yours has another name, press **Choose the drive…** once. **B
 the QuadStick** then reads the drive straight away, with no folder to pick. On a NAS
 the app cannot see your computer's drives, so the list shows your newest backup.
 
-![The profiles on the QuadStick, with their lights](docs/screenshots/16-on-device.webp)
+![The desktop app reading the QuadStick: each profile with the lights that pick it](docs/screenshots/16-on-device.webp)
 
 ### Put your profiles on the QuadStick (desktop app)
 
