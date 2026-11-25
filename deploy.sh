@@ -96,7 +96,21 @@ fi
 echo "building quadstick v${APP_VERSION} ${GIT_SHA} (${BUILD_TIME})"
 # --pull: fetch the newest base images (nginx stable, node, python) every time,
 # so security patches land on the next deploy instead of whenever the cache expires
-docker compose build --pull
+# web/Dockerfile builds the app on $BUILDPLATFORM, which only BuildKit (buildx)
+# fills in. Docker on TOS 7 has no buildx, so compose falls back to the classic
+# builder and the web build stops with '"" is an invalid OS component'. There,
+# pass this machine's own platform.
+if docker buildx version >/dev/null 2>&1; then
+  docker compose build --pull
+else
+  case "$(uname -m)" in
+    x86_64|amd64)  platform=linux/amd64 ;;
+    aarch64|arm64) platform=linux/arm64 ;;
+    *)             platform="linux/$(uname -m)" ;;
+  esac
+  echo "note: no docker buildx; building for $platform with the classic builder"
+  docker compose build --pull --build-arg BUILDPLATFORM="$platform"
+fi
 docker compose up -d
 
 # db and api have health checks; web waits on api. Give them a moment, then say
