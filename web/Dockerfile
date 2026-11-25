@@ -2,6 +2,11 @@
 # The SPA is plain files, the same on every CPU, so it is built once on the
 # builder's own platform: the release's arm64 image would otherwise run npm and
 # vite under QEMU emulation, which is slow and has hung a release build.
+#
+# BuildKit sets BUILDPLATFORM itself. The classic builder (Docker without buildx,
+# as on TOS 7) does not, and uses a value in FROM only if it is declared here;
+# deploy.sh then passes the machine's own platform.
+ARG BUILDPLATFORM
 FROM --platform=$BUILDPLATFORM node:22-alpine AS build
 WORKDIR /app
 COPY web/package.json web/package-lock.json ./
