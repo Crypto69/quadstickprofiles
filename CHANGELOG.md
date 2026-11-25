@@ -3,6 +3,32 @@
 Each release, in plain words. The newest is first. The part for a version is also
 shown at the top of its page on GitHub.
 
+## 1.26 — 25 November 2026
+
+### Coming to the Mac App Store
+
+There is now a Mac App Store version of the app. It is the same app, and it is free.
+It has been sent to Apple and will be in the store once Apple has checked it.
+
+Apple keeps store apps in a "sandbox": an app may only open the files and drives you
+hand it. So the store version works a little differently with the QuadStick:
+
+- **The first time** you plug in the QuadStick, **The device** page says the drive is
+  plugged in and asks you to choose it. Press **Choose the drive…**, then **Open**.
+  You only do this once.
+- After that the app opens the drive by itself, even after you unplug it, plug it back
+  in, or restart the Mac.
+- Exports and backups are saved in **Downloads › QuadStick exports** (in the download
+  version they are in **Documents**).
+
+The version you download from GitHub works as before.
+
+### Smaller things
+
+- On the Mac, **Show in folder**, printing and the message boxes now open through
+  macOS itself.
+- The NAS version installs again on TerraMaster's TOS 7.
+
 ## 1.20 — 24 November 2026
 
 ### Put your profiles on the QuadStick, in one step
