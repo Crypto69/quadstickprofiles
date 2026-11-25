@@ -65,6 +65,12 @@ else
   echo "sign_mas.sh: signing for the Mac App Store with $matches"
 fi
 
+# App Store Connect refuses a package with any file still tagged
+# com.apple.quarantine (error 91109). Files fetched from the web carry it into the
+# bundle (the downloaded profile, sample files saved from a browser), so strip every
+# extended attribute before signing; codesign wants them gone anyway.
+xattr -cr "$APP"
+
 # A helper executable would need its own two entitlements (app-sandbox + inherit);
 # the PyInstaller bundle has none besides the main one, so stop if that changes.
 inherit="$work/inherit.entitlements"
@@ -90,6 +96,11 @@ done < "$work/machos"
 codesign --force $ts --entitlements "$ent" --sign "$HASH" "$APP"
 
 codesign --verify --deep --strict --verbose=2 "$APP"
+if xattr -lr "$APP" 2>/dev/null | grep -q com.apple.quarantine; then
+  echo "sign_mas.sh: files in the app are still tagged com.apple.quarantine:" >&2
+  xattr -lr "$APP" | grep com.apple.quarantine | cut -d: -f1 | sort -u >&2
+  exit 1
+fi
 codesign -d --entitlements - "$APP" 2>/dev/null | grep -q 'com.apple.security.app-sandbox' || {
   echo "sign_mas.sh: the signed app has no App Sandbox entitlement" >&2; exit 1; }
 echo "sign_mas.sh: signed $APP ($(wc -l < "$work/machos" | tr -d ' ') nested files)"
