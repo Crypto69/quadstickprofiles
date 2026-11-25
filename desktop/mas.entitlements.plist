@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!-- The Mac App Store build's App Sandbox. sign_mas.sh adds the application and
+       team identifiers from the provisioning profile; nothing else belongs here
+       without a reason written next to it (App Review asks for each one).
+
+       network.server: the app's own API listens on 127.0.0.1 and nowhere else.
+       network.client: the app's window (WKWebView) loads that address. -->
+  <key>com.apple.security.app-sandbox</key>
+  <true/>
+  <key>com.apple.security.network.server</key>
+  <true/>
+  <key>com.apple.security.network.client</key>
+  <true/>
+  <!-- Import a profile, and pick the QuadStick's drive in the folder dialog. -->
+  <key>com.apple.security.files.user-selected.read-write</key>
+  <true/>
+  <!-- Keep the drive that was picked, so it is opened again without asking
+       (security-scoped bookmark, desktop/mac_native.py). -->
+  <key>com.apple.security.files.bookmarks.app-scope</key>
+  <true/>
+  <!-- Exports and backup zips are saved to Downloads/QuadStick exports. -->
+  <key>com.apple.security.files.downloads.read-write</key>
+  <true/>
+</dict>
+</plist>

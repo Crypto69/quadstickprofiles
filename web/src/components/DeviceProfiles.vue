@@ -67,11 +67,20 @@ const skipped = computed(() => skippedByTheSwitch(paths.value))
       <p v-if="drive.found" role="status">
         Reading the drive <b>{{ drive.state?.name }}</b> now.
       </p>
+      <p v-else-if="drive.needsPermission" role="status">
+        The drive <b>{{ drive.state?.name }}</b> is plugged in. Press
+        <b>Choose the drive…</b> and then <b>Open</b>, once, so the app is allowed to use it.
+      </p>
       <p v-else-if="drive.state" role="status">
         Plug in the QuadStick. The app looks for the drive called
         <b>{{ drive.state.name }}</b>.
       </p>
-      <button class="btn btn--small" type="button" @click="chooseDrive">
+      <button
+        class="btn btn--small"
+        :class="{ 'btn--primary': drive.needsPermission }"
+        type="button"
+        @click="chooseDrive"
+      >
         {{ drive.found ? 'Use a different drive…' : 'Choose the drive…' }}
       </button>
       <ReplaceDrive v-if="drive.writable" />

@@ -15,7 +15,14 @@ macOS).
 | exported `.csv` / `.xlsx` | `Documents\QuadStick exports` | `~/Documents/QuadStick exports` |
 
 Set `QS_DESKTOP_HOME=<folder>` to put all three under one folder instead (the build
-check and CI do this so they never touch a real profile).
+check and CI do this so they never touch a real profile). A relative folder is under
+`~`.
+
+The Mac App Store build runs in Apple's App Sandbox, where `~` is the app's container:
+the data and the log are under
+`~/Library/Containers/ai.myaccessibility.quadstickprofilestudio/Data/Library/…`, and
+exports go to `~/Downloads/QuadStick exports` (the one folder outside the container
+it may write without asking). See "Mac App Store" below.
 
 Upgrading is "replace the app folder". The data folder is never inside it. A newer
 build upgrades the database on first launch (`alembic upgrade head` from the stamp
@@ -83,6 +90,62 @@ python desktop/launcher.py --headless    # server only; prints the URL
 - An unsigned macOS build (no identity in the keychain) hits Gatekeeper: right-click
   → *Open* once, or `xattr -dr com.apple.quarantine "QuadStick Profile Studio.app"`.
 
+## Mac App Store
+
+The same app, signed differently: App Sandbox on (`mas.entitlements.plist`, each
+permission explained there), no hardened runtime, the store's provisioning profile
+inside, packed as an installer `.pkg`. The Developer ID download above is not
+sandboxed and does not change.
+
+What the sandbox changes, all in `mac_native.py`:
+
+- **The QuadStick's drive.** The app still sees the drive by name, but may not open
+  it until the person picks it once with *Choose the drive…* (the dialog opens on the
+  drive; pressing *Open* is enough). The app keeps a security-scoped bookmark of it
+  in `drive.json` and opens the drive through it from then on, after a replug and
+  after a restart. Until then the device page says the drive is plugged in and asks
+  for that one pick (`needs_permission`). A different stick is a different drive and
+  is picked once too.
+- **Exports** go to `~/Downloads/QuadStick exports`; *Show in folder* works there.
+- No `osascript` or `open`: Finder, the browser and message boxes go through AppKit
+  (both builds).
+
+```sh
+sh desktop/build_mas.sh --sandbox-test        # ad hoc signed, the same sandbox, runs here
+sh scripts/desktop_check.sh --sandboxed "desktop/dist/QuadStick Profile Studio.app/Contents/MacOS/QuadStick Profile Studio"
+"desktop/dist/QuadStick Profile Studio.app/Contents/MacOS/QuadStick Profile Studio" --drive-check
+sh desktop/build_mas.sh ~/Downloads/QuadStick_Profile_Studio_Mac_App_Store.provisionprofile
+sh desktop/upload_mas.sh desktop/dist/QuadStickProfileStudio-<version>-mas.pkg   # or Apple's Transporter app
+```
+
+`--drive-check` prints which drives the app can see and open, and what the device
+page would be told, without changing anything; inside the sandbox an unpicked drive
+shows as `false` / `needs_permission`. A store-signed app does not start outside the
+store, so test with `--sandbox-test` (or TestFlight).
+
+What the store build needs, once (the owner's Apple account):
+
+1. The App ID `ai.myaccessibility.quadstickprofilestudio` (registered) and the app
+   in App Store Connect (My Apps → + → New App, that bundle ID).
+2. Certificates in the keychain: **Apple Distribution** (signs the app) and **Mac
+   Installer Distribution** (signs the `.pkg`). Xcode → Settings → Accounts → Manage
+   Certificates → +.
+3. A **Mac App Store Connect** provisioning profile for that App ID with the Apple
+   Distribution certificate, downloaded. `sign_mas.sh` checks it is the store one, for
+   this app, from the certificate's team, and not expired.
+4. To upload, the App Store Connect API key needs the App Manager role.
+
+`.github/workflows/store-mac.yml` builds and runs the sandbox check on every change
+to this, and on tags. With the four store secrets as well as the three API ones it
+also signs, packs and has Apple check the `.pkg` (left on the run's page); *Run
+workflow* with *upload* ticked sends it to App Store Connect. `sh
+desktop/set_mas_secrets.sh` loads the four from a folder (file names in its header).
+Submitting the build for review stays by hand in App Store Connect.
+
+The build number (`CFBundleVersion`) is the commit count, so it grows with every
+upload; the version is `scripts/version.sh`'s. Upload only tagged versions: an
+untagged `1.105` would sort above a later tag `1.21`.
+
 ## Smoke test (do this on every build before a release)
 
 macOS first, then Windows. Delete nothing between steps unless it says so.
@@ -113,6 +176,9 @@ macOS first, then Windows. Delete nothing between steps unless it says so.
     list shows the two (plus the drive's own `default.csv` when neither is one),
     `prefs.csv` is still on the drive, and after a replug the QuadStick loads them. On
     macOS, ejecting afterwards gives no "not ejected properly" warning.
+    **Mac App Store build** (`build_mas.sh --sandbox-test`, from a fresh container):
+    the page first says the drive is plugged in and asks to choose it; *Choose the
+    drive…* → *Open* lists it; quit, replug, relaunch: it is listed with no dialog.
 11. *Test it* → *Open the tester in your browser* opens `/tester` in the system browser.
     In Chrome or Edge, with a QuadStick plugged in, *Connect the QuadStick* lists it.
 

@@ -15,8 +15,15 @@ WebView's file input could not do that part either: pywebview answers
 One call writes to the drive: `write_quadstick_drive` puts a set of profiles on it in
 place of the ones there now (`replace_profiles`). The web page backs the drive up
 first; this side checks every name again, writes the new files before it removes
-anything, and flushes before it answers, so "done" means safe to unplug."""
+anything, and flushes before it answers, so "done" means safe to unplug.
+
+The Mac App Store build runs in Apple's sandbox, where a mounted drive may be seen
+but not opened. There the drive is still found by name, but it is opened through a
+bookmark (`mac_native`) that only picking it in the folder dialog creates. Until it
+has been picked once, `quadstick_drive` answers `needs_permission` and the page says
+to choose it; after that it works as above, every launch, for that drive."""
 import base64
+import binascii
 import errno
 import json
 import logging
@@ -24,11 +31,19 @@ import os
 import re
 import subprocess
 import webbrowser
+from contextlib import contextmanager
 from pathlib import Path
 
 from qsprofile.catalog import check_csv_filename
 
 from host_os import IS_MAC, IS_WINDOWS
+
+if IS_MAC:
+    import mac_native
+    SANDBOXED = mac_native.SANDBOXED
+else:
+    mac_native = None
+    SANDBOXED = False
 
 log = logging.getLogger("desktop.api")
 
@@ -224,6 +239,8 @@ def mounted_volumes() -> list[tuple[str, Path]]:
     looked at here, so a slow network share is never opened."""
     if IS_WINDOWS:
         return _windows_volumes()
+    if SANDBOXED:                          # /Volumes itself may not be listed there
+        return mac_native.mounted_volumes()
     roots = [Path("/Volumes")] if IS_MAC else [Path("/media") / _user(), Path("/run/media") / _user()]
     out = []
     for root in roots:
@@ -280,10 +297,14 @@ def volume_name(folder: Path, volumes: list[tuple[str, Path]]) -> str | None:
 
 
 class DesktopApi:
-    def __init__(self, exports_dir: Path, origin: str, data_dir: Path | None = None):
+    def __init__(self, exports_dir: Path, origin: str, data_dir: Path | None = None,
+                 bookmarks=None):
         self._exports = Path(exports_dir).resolve()
         self._origin = origin.rstrip("/")
         self._memory = Path(data_dir) / "drive.json" if data_dir else None
+        # Only in the sandbox: how a drive picked once is opened again (mac_native).
+        self._bookmarks = bookmarks if bookmarks is not None else (
+            mac_native.Bookmarks() if SANDBOXED else None)
 
     def reveal(self, path: str) -> None:
         target = Path(path).resolve()
@@ -292,55 +313,91 @@ class DesktopApi:
             return
         log.info("reveal %s", target)
         if IS_MAC:
-            subprocess.Popen(["open", "-R", str(target)])
+            mac_native.reveal(target)
         elif IS_WINDOWS:
             subprocess.Popen(["explorer", f"/select,{target}"])
         else:
             subprocess.Popen(["xdg-open", str(target.parent)])
 
     # ------------------------------------------------------------- the QuadStick drive
-    def _remembered(self) -> str | None:
+    def _memory_data(self) -> dict:
         try:
-            name = json.loads(self._memory.read_text("utf-8")).get("name") if self._memory else None
-        except (OSError, ValueError, AttributeError):
-            return None
+            data = json.loads(self._memory.read_text("utf-8")) if self._memory else {}
+        except (OSError, ValueError):
+            return {}
+        return data if isinstance(data, dict) else {}
+
+    def _remembered(self) -> str | None:
+        name = self._memory_data().get("name")
         return name if isinstance(name, str) and name else None
 
-    def _remember(self, name: str) -> None:
-        if self._memory and name != self._remembered():
-            log.info("remembering the QuadStick drive as %r", name)
-            self._memory.write_text(json.dumps({"name": name}), "utf-8")
+    def _bookmark(self) -> bytes | None:
+        mark = self._memory_data().get("bookmark")
+        try:
+            return base64.b64decode(mark, validate=True) if isinstance(mark, str) and mark else None
+        except (binascii.Error, ValueError):
+            return None
 
-    def _found(self) -> tuple[str, Path] | None:
+    def _remember(self, name: str, bookmark: bytes | None = None) -> None:
+        """drive.json: the drive's name, and in the sandbox the bookmark that opens it."""
+        if not self._memory:
+            return
+        want = {"name": name}
+        if bookmark is not None:
+            want["bookmark"] = base64.b64encode(bookmark).decode("ascii")
+        elif self._bookmarks is not None and (old := self._bookmark()) is not None:
+            want["bookmark"] = base64.b64encode(old).decode("ascii")
+        if want != self._memory_data():
+            if name != self._remembered():
+                log.info("remembering the QuadStick drive as %r", name)
+            self._memory.write_text(json.dumps(want), "utf-8")
+
+    @contextmanager
+    def _drive(self):
+        """The QuadStick's drive, open for the length of the `with`: (name, root,
+        allowed), or None when it is not plugged in. `allowed` is False only in the
+        sandbox, for a drive that is plugged in but has not been picked yet."""
+        if self._bookmarks is not None and (mark := self._bookmark()):
+            with self._bookmarks.open(mark) as opened:
+                if opened:
+                    root, fresh = opened
+                    name = volume_name(root, mounted_volumes()) or root.name
+                    self._remember(name, fresh or mark)
+                    yield name, root, True
+                    return
         hit = find_drive(self._remembered(), mounted_volumes())
-        if hit:
+        if hit and self._bookmarks is None:
             self._remember(hit[0])
-        return hit
+        yield (hit[0], hit[1], self._bookmarks is None) if hit else None
 
     def quadstick_drive(self) -> dict:
         """What is on the drive now: {found, name, files: [{path, size}]}. Not found,
-        `name` is the one being looked for, so the page can say what to plug in."""
-        hit = self._found()
-        if not hit:
-            return {"found": False, "name": self._remembered() or DEFAULT_NAME, "files": []}
-        name, root = hit
-        return {"found": True, "name": name, "files": list_drive(root)}
+        `name` is the one being looked for, so the page can say what to plug in. In the
+        sandbox, a drive that is plugged in but not yet picked adds `needs_permission`."""
+        with self._drive() as hit:
+            if not hit:
+                return {"found": False, "name": self._remembered() or DEFAULT_NAME, "files": []}
+            name, root, allowed = hit
+            if not allowed:
+                return {"found": False, "name": name, "files": [], "needs_permission": True}
+            return {"found": True, "name": name, "files": list_drive(root)}
 
     def read_quadstick_drive(self) -> list[dict] | None:
         """Every file on the drive, for a backup (see `read_drive`); None when it is
-        not plugged in."""
-        hit = self._found()
-        if not hit:
-            return None
-        log.info("reading the QuadStick drive %r at %s", *hit)
-        try:
-            return read_drive(hit[1])
-        except FolderTooBig:
-            raise
-        except OSError as e:                 # unplugged mid-read, or a drive that will not read
-            log.warning("reading %s failed: %s", hit[1], e)
-            raise ValueError(f"Could not read the drive {hit[0]}. Unplug the QuadStick, plug it "
-                             "back in, and try again.") from e
+        not plugged in, or not yet picked in the sandbox (the page then asks)."""
+        with self._drive() as hit:
+            if not hit or not hit[2]:
+                return None
+            name, root, _ = hit
+            log.info("reading the QuadStick drive %r at %s", name, root)
+            try:
+                return read_drive(root)
+            except FolderTooBig:
+                raise
+            except OSError as e:             # unplugged mid-read, or a drive that will not read
+                log.warning("reading %s failed: %s", root, e)
+                raise ValueError(f"Could not read the drive {name}. Unplug the QuadStick, plug "
+                                 "it back in, and try again.") from e
 
     def write_quadstick_drive(self, files: list[dict]) -> dict:
         """Put these profiles ([{name, data}], data base64) on the drive in place of the
@@ -357,29 +414,37 @@ class DesktopApi:
             if isinstance(e, NotWritten):
                 raise
             raise NotWritten("The profiles did not arrive whole. Nothing was changed.") from e
-        hit = self._found()
-        if not hit:
-            raise NotWritten("The QuadStick is not plugged in. Nothing was changed.")
-        name, root = hit
-        log.info("replacing the profiles on %r at %s with %s", name, root, sorted(decoded))
-        try:
-            done = replace_profiles(root, decoded)
-        except NotWritten:
-            raise
-        except OSError as e:
-            log.warning("writing %s failed part way: %s", root, e)
-            raise ValueError(f"Writing to {name} stopped part way ({e.strerror or e}). Restore "
-                             "the backup the app just took if the QuadStick misbehaves.") from e
+        with self._drive() as hit:
+            if not hit:
+                raise NotWritten("The QuadStick is not plugged in. Nothing was changed.")
+            name, root, allowed = hit
+            if not allowed:
+                raise NotWritten(f"Press Choose the drive… and pick {name} once, so the app may "
+                                 "use it. Nothing was changed.")
+            log.info("replacing the profiles on %r at %s with %s", name, root, sorted(decoded))
+            try:
+                done = replace_profiles(root, decoded)
+            except NotWritten:
+                raise
+            except OSError as e:
+                log.warning("writing %s failed part way: %s", root, e)
+                raise ValueError(f"Writing to {name} stopped part way ({e.strerror or e}). "
+                                 "Restore the backup the app just took if the QuadStick "
+                                 "misbehaves.") from e
         log.info("wrote %s, removed %s", done["written"], done["removed"])
         return self.quadstick_drive()
 
     def choose_quadstick_drive(self) -> dict | None:
-        """Ask which drive is the QuadStick, remember its name, and answer as
+        """Ask which drive is the QuadStick, remember it, and answer as
         `quadstick_drive`; None when the dialog is cancelled. A folder that is not the
         top of a drive, or has no profile on it, raises: pywebview rejects the
-        JavaScript promise with the message."""
+        JavaScript promise with the message. The dialog opens on the drive when one is
+        plugged in, so Open is all it takes; in the sandbox that one pick is what lets
+        the app open the drive from then on."""
         import webview
-        picked = webview.windows[0].create_file_dialog(webview.FileDialog.FOLDER)
+        with self._drive() as hit:
+            start = str(hit[1]) if hit else ("/Volumes" if IS_MAC else "")
+        picked = webview.windows[0].create_file_dialog(webview.FileDialog.FOLDER, directory=start)
         if not picked:
             return None
         folder = Path(picked[0] if isinstance(picked, (list, tuple)) else picked)
@@ -388,7 +453,15 @@ class DesktopApi:
             raise ValueError("Pick the QuadStick drive itself, not a folder inside it.")
         if not any(p.suffix.lower() == ".csv" for p in folder.iterdir() if p.is_file()):
             raise ValueError(f"{name} has no profiles on it. Pick the QuadStick drive.")
-        self._remember(name)
+        if self._bookmarks is not None:
+            try:
+                self._remember(name, self._bookmarks.create(folder))
+            except OSError as e:
+                log.warning("no bookmark for %s: %s", folder, e)
+                raise ValueError(f"macOS would not let the app keep using {name}. Choose it "
+                                 "again.") from e
+        else:
+            self._remember(name)
         return self.quadstick_drive()
 
     def open_external(self, url: str) -> None:
@@ -396,4 +469,7 @@ class DesktopApi:
             log.warning("open_external refused: %s", url)
             return
         log.info("open_external %s", url)
-        webbrowser.open(url)
+        if IS_MAC:
+            mac_native.open_url(url)         # no osascript child: the sandbox stops it
+        else:
+            webbrowser.open(url)

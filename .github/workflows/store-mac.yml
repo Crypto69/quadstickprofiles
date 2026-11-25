@@ -1,0 +1,159 @@
+# The Mac App Store package (.pkg), ready for App Store Connect.
+#
+# Runs on every v* tag, beside the release; on any push that changes the Mac store
+# build or the sandbox code; and by hand from the Actions tab (Run workflow; tick
+# "upload" to also send it to App Store Connect). The .pkg is left as a download on
+# the run's page; it is not attached to the GitHub Release, because a store-signed
+# app opens only once the store has installed it.
+#
+# Always: the app is built, signed ad hoc in the App Sandbox, and started headless
+# inside it (scripts/desktop_check.sh --sandboxed), so the sandbox is proved on
+# every change. With the store secrets (desktop/README.md, "Mac App Store"), the same
+# app is then signed for the store, packed, and checked by Apple (altool
+# --validate-app). Without them the run stops after the sandbox check.
+name: Mac App Store package
+
+on:
+  push:
+    tags: ["v*"]
+    branches: ["**"]
+    paths:
+      - desktop/build_mas.sh
+      - desktop/sign_mas.sh
+      - desktop/upload_mas.sh
+      - desktop/mas.entitlements.plist
+      - desktop/mac_native.py
+      - desktop/desktop_api.py
+      - desktop/launcher.py
+      - desktop/quadstick.spec
+      - scripts/desktop_check.sh
+      - .github/workflows/store-mac.yml
+  workflow_dispatch:
+    inputs:
+      upload:
+        description: "Upload the package to App Store Connect"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  pkg:
+    name: Build, sandbox check and package
+    runs-on: macos-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0          # version.sh counts commits; the build number is the count
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            core/pyproject.toml
+            api/pyproject.toml
+            desktop/requirements.txt
+      - run: pip install -e core -e api -r desktop/requirements.txt
+
+      - name: Build the app, ad hoc signed in the App Sandbox
+        run: sh desktop/build_mas.sh --sandbox-test
+      - name: Start it headless inside the sandbox
+        run: sh scripts/desktop_check.sh --sandboxed "desktop/dist/QuadStick Profile Studio.app/Contents/MacOS/QuadStick Profile Studio"
+
+      # All seven or none, as in release.yml: a partial set would build something
+      # that looks signed and is then refused by App Store Connect.
+      - name: Are the Mac App Store secrets present?
+        id: store
+        env:
+          MAS_APP_CERT_P12: ${{ secrets.MAS_APP_CERT_P12 }}
+          MAS_INSTALLER_CERT_P12: ${{ secrets.MAS_INSTALLER_CERT_P12 }}
+          MAS_CERT_PASSWORD: ${{ secrets.MAS_CERT_PASSWORD }}
+          MAS_PROVISION_PROFILE: ${{ secrets.MAS_PROVISION_PROFILE }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER_ID: ${{ secrets.APPLE_API_ISSUER_ID }}
+          APPLE_API_KEY_P8: ${{ secrets.APPLE_API_KEY_P8 }}
+        run: |
+          all="MAS_APP_CERT_P12 MAS_INSTALLER_CERT_P12 MAS_CERT_PASSWORD MAS_PROVISION_PROFILE APPLE_API_KEY_ID APPLE_API_ISSUER_ID APPLE_API_KEY_P8"
+          present=""; missing=""
+          for v in $all; do
+            if [ -n "${!v}" ]; then present="$present $v"; else missing="$missing $v"; fi
+          done
+          if [ -z "$missing" ]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          elif [ -z "$(echo "$present" | tr ' ' '\n' | grep '^MAS_')" ]; then
+            echo "::notice::no Mac App Store secrets: the sandbox check passed; no store package is made"
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "::error::Mac App Store secrets are incomplete (missing:$missing). Set all of them or none."
+            exit 1
+          fi
+        shell: bash
+
+      - name: Import the store certificates into a throwaway keychain
+        if: steps.store.outputs.enabled == 'true'
+        env:
+          MAS_APP_CERT_P12: ${{ secrets.MAS_APP_CERT_P12 }}
+          MAS_INSTALLER_CERT_P12: ${{ secrets.MAS_INSTALLER_CERT_P12 }}
+          MAS_CERT_PASSWORD: ${{ secrets.MAS_CERT_PASSWORD }}
+        run: |
+          keychain="$RUNNER_TEMP/store.keychain-db"
+          pw="$(uuidgen)"
+          security create-keychain -p "$pw" "$keychain"
+          security set-keychain-settings -lut 21600 "$keychain"
+          security unlock-keychain -p "$pw" "$keychain"
+          for c in MAS_APP_CERT_P12 MAS_INSTALLER_CERT_P12; do
+            printf '%s' "${!c}" | base64 --decode > "$RUNNER_TEMP/c.p12"
+            security import "$RUNNER_TEMP/c.p12" -P "$MAS_CERT_PASSWORD" -A -f pkcs12 -k "$keychain"
+            rm -f "$RUNNER_TEMP/c.p12"
+          done
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$pw" "$keychain" > /dev/null
+          security list-keychains -d user -s "$keychain" login.keychain-db
+          # Pin the app certificate by hash, from this keychain only (as release.yml).
+          line="$(security find-identity -v -p codesigning "$keychain" | grep -E '"(Apple Distribution|3rd Party Mac Developer Application)')"
+          [ "$(printf '%s' "$line" | grep -c .)" -eq 1 ] || { echo "::error::expected one Apple Distribution certificate, found: $line"; exit 1; }
+          echo "CODESIGN_IDENTITY=$(printf '%s\n' "$line" | sed -n 's/^ *[0-9][0-9]*) \([0-9A-Fa-f]\{40\}\) .*/\1/p')" >> "$GITHUB_ENV"
+        shell: bash
+
+      - name: Sign for the store and pack the .pkg
+        if: steps.store.outputs.enabled == 'true'
+        env:
+          MAS_PROVISION_PROFILE: ${{ secrets.MAS_PROVISION_PROFILE }}
+          QS_SKIP_BUILD: "1"            # the very app the sandbox check just ran
+        run: |
+          printf '%s' "$MAS_PROVISION_PROFILE" | base64 --decode > "$RUNNER_TEMP/store.provisionprofile"
+          sh desktop/build_mas.sh "$RUNNER_TEMP/store.provisionprofile"
+          rm -f "$RUNNER_TEMP/store.provisionprofile"
+        shell: bash
+
+      - name: Have Apple check the package, and upload it if asked
+        if: steps.store.outputs.enabled == 'true'
+        env:
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER_ID: ${{ secrets.APPLE_API_ISSUER_ID }}
+          APPLE_API_KEY_P8: ${{ secrets.APPLE_API_KEY_P8 }}
+          UPLOAD: ${{ github.event_name == 'workflow_dispatch' && inputs.upload }}
+        run: |
+          export APPLE_API_KEY_PATH="$RUNNER_TEMP/AuthKey.p8"
+          printf '%s' "$APPLE_API_KEY_P8" | base64 --decode > "$APPLE_API_KEY_PATH"
+          pkg="$(ls desktop/dist/*-mas.pkg | head -1)"
+          if [ "$UPLOAD" = "true" ]; then
+            sh desktop/upload_mas.sh "$pkg"
+          else
+            sh desktop/upload_mas.sh "$pkg" --validate-only
+          fi
+          rm -f "$APPLE_API_KEY_PATH"
+        shell: bash
+
+      - uses: actions/upload-artifact@v4
+        if: steps.store.outputs.enabled == 'true'
+        with:
+          name: mac-app-store-pkg
+          path: desktop/dist/*-mas.pkg
+          if-no-files-found: error

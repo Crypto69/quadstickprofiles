@@ -7,6 +7,7 @@ at it. The smoke test is in README.md here.
     python desktop/launcher.py              # from a checkout, after `npm run build`
     python desktop/launcher.py --headless   # server only, prints the URL (used by CI
                                             # and the build check; Ctrl+C to stop)
+    python desktop/launcher.py --drive-check   # what it sees of the QuadStick's drive
 """
 import logging
 import multiprocessing
@@ -25,22 +26,36 @@ if str(HERE) not in sys.path:               # so bundle_paths / desktop_api impo
 
 from host_os import IS_MAC, IS_WINDOWS      # noqa: E402  (needs HERE on sys.path when frozen)
 
+if IS_MAC:
+    import mac_native                       # noqa: E402
+    SANDBOXED = mac_native.SANDBOXED         # the Mac App Store build (mac_native.py)
+else:
+    SANDBOXED = False
+
 log = logging.getLogger("desktop")
 
 
 # ----------------------------------------------------------------- folders, logging
 def user_folders():
     """Per-OS locations. QS_DESKTOP_HOME=<dir> puts everything under one folder
-    instead (the build check and CI use it, so they never touch a real profile)."""
+    instead (the build check and CI use it, so they never touch a real profile); a
+    relative one is under `~`, which in the sandbox is the app's container.
+
+    In the Mac App Store build `~` is that container, so the data and the logs land
+    there by themselves; exports go to the real Downloads folder, the one place
+    outside it the sandbox lets the app write (see mac_native.py)."""
     override = os.environ.get("QS_DESKTOP_HOME")
     if override:
-        base = Path(override)
+        base = Path.home() / override
         data, logs, exports = base / "data", base / "logs", base / "exports"
     else:
         import platformdirs
         data = Path(platformdirs.user_data_dir(APP_NAME, appauthor=False))
         logs = Path(platformdirs.user_log_dir(APP_NAME, appauthor=False))
-        exports = Path.home() / "Documents" / "QuadStick exports"
+        if SANDBOXED:
+            exports = mac_native.real_home() / "Downloads" / "QuadStick exports"
+        else:
+            exports = Path.home() / "Documents" / "QuadStick exports"
     for d in (data, logs, exports):
         d.mkdir(parents=True, exist_ok=True)
     return data, logs, exports
@@ -96,9 +111,7 @@ def native_message(title: str, text: str):
             import ctypes
             ctypes.windll.user32.MessageBoxW(None, text, title, 0x40)   # MB_ICONINFORMATION
         elif IS_MAC:
-            import subprocess
-            subprocess.run(["osascript", "-e",
-                            f'display dialog "{text}" with title "{title}" buttons {{"OK"}}'])
+            mac_native.alert(title, text)            # osascript is not allowed in the sandbox
         else:
             print(f"{title}: {text}")
     except Exception:                                    # never let a dialog crash the launcher
@@ -145,8 +158,11 @@ def open_window(url: str, api, storage: Path) -> str:
         return "window"
     except Exception as e:                               # no WebView2 runtime, or a GUI error
         log.exception("could not open the app window: %s", e)
-        import webbrowser
-        webbrowser.open(url)
+        if IS_MAC:
+            mac_native.open_url(url)
+        else:
+            import webbrowser
+            webbrowser.open(url)
         native_message(APP_NAME,
                        "The app window could not be opened, so it was opened in your browser "
                        "instead. Press OK when you are done with it to stop the app.")
@@ -156,13 +172,17 @@ def open_window(url: str, api, storage: Path) -> str:
 # -------------------------------------------------------------------------- main
 def main(argv=None) -> int:
     multiprocessing.freeze_support()
+    if getattr(sys, "frozen", False):
+        sys.dont_write_bytecode = True       # never write .pyc into the signed bundle
+    if SANDBOXED:
+        mac_native.quiet_system_files()
     argv = sys.argv[1:] if argv is None else argv
     headless = "--headless" in argv
 
     from bundle_paths import resource_path
     data, logs, exports = user_folders()
     setup_logging(logs / "launcher.log")
-    log.info("starting; data=%s exports=%s", data, exports)
+    log.info("starting; data=%s exports=%s%s", data, exports, " (App Sandbox)" if SANDBOXED else "")
 
     os.environ.setdefault("QS_DATABASE_URL", f"sqlite+pysqlite:///{data / 'studio.sqlite'}")
     os.environ["QS_EXPORTS_DIR"] = str(exports)
@@ -171,6 +191,24 @@ def main(argv=None) -> int:
     os.environ["QS_STATIC_DIR"] = str(resource_path("web_dist"))
     os.environ["QS_NO_DOTENV"] = "1"
     apply_version(resource_path("version.txt"))
+
+    if "--drive-check" in argv:
+        # What the app sees of the QuadStick's drive, as JSON, then exit: the one way
+        # to see it from a terminal in the sandboxed build (desktop/README.md).
+        import json
+        from desktop_api import DesktopApi, mounted_volumes
+        api = DesktopApi(exports, "http://127.0.0.1", data)
+        api._remember = lambda *a, **k: None          # look only: drive.json stays as it is
+        state = api.quadstick_drive()
+        readable = {}
+        for name, root in mounted_volumes():
+            try:
+                os.listdir(root)
+                readable[name] = True
+            except OSError:
+                readable[name] = False        # the sandbox, until the drive is picked
+        print(json.dumps({"volumes": readable, "drive": state}), flush=True)
+        return 0
 
     lock = SingleInstance(data / "launcher.lock")
     if not lock.acquire():

@@ -137,6 +137,19 @@ describe('DeviceProfiles in the desktop app', () => {
     w.unmount()
   })
 
+  it('in the Mac App Store build, asks for a plugged-in drive to be picked once', async () => {
+    const s = shell({ found: false, name: 'Quad Stick', files: [], needs_permission: true })
+    const w = withBackups([])
+    await flushPromises()
+    expect(w.text()).toContain('The drive Quad Stick is plugged in')
+    expect(w.text()).not.toContain('Plug in the QuadStick.')
+    const choose = w.findAll('button').find((b) => b.text().includes('Choose the drive'))!
+    expect(choose.classes()).toContain('btn--primary')
+    await choose.trigger('click')
+    expect(s.choose_quadstick_drive).toHaveBeenCalled()
+    w.unmount()
+  })
+
   it('can be told which drive is the QuadStick', async () => {
     const s = shell({ found: false, name: 'QuadStick', files: [] })
     const w = withBackups([])

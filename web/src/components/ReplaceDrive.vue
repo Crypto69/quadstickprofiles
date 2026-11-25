@@ -112,7 +112,7 @@ async function write() {
     class="btn btn--small btn--primary"
     type="button"
     :disabled="!drive.found"
-    :title="drive.found ? '' : 'Plug in the QuadStick first'"
+    :title="drive.found ? '' : drive.needsPermission ? 'Choose the drive first' : 'Plug in the QuadStick first'"
     @click="start"
   >
     Put my profiles on the QuadStick…
@@ -197,7 +197,9 @@ async function write() {
       <ul v-if="plan.problems.length && !loading && profiles.length" class="banner banner--warn">
         <li v-for="m in plan.problems" :key="m">{{ m }}</li>
       </ul>
-      <p v-if="!drive.found" class="banner banner--warn">Plug in the QuadStick first.</p>
+      <p v-if="!drive.found" class="banner banner--warn">
+        {{ drive.needsPermission ? 'Choose the drive first.' : 'Plug in the QuadStick first.' }}
+      </p>
     </div>
 
     <div v-if="error" class="banner banner--error" role="alert">

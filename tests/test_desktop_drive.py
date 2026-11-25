@@ -3,6 +3,8 @@ backup, and how it finds the drive by name. The API checks the same upload again
 (api/tests/test_backups.py); this proves the desktop side reads every real file, as
 bytes, and nothing else, and that it finds and remembers the right drive."""
 import base64
+import contextlib
+import json
 import sys
 from pathlib import Path
 
@@ -108,3 +110,94 @@ def test_a_drive_that_will_not_read_says_so_in_plain_words(tmp_path, monkeypatch
     monkeypatch.setattr(desktop_api, "read_drive", broken)
     with pytest.raises(ValueError, match="Could not read the drive Quad Stick"):
         DesktopApi(tmp_path, "http://127.0.0.1:1", None).read_quadstick_drive()
+
+
+# ------------------------------------------------------------- the Mac App Store sandbox
+class FakeBookmarks:
+    """mac_native.Bookmarks without macOS: a bookmark is the folder's path, and it opens
+    only while that folder exists and the test has not taken the permission away."""
+
+    def __init__(self):
+        self.revoked = False
+        self.opened = 0
+
+    def create(self, folder):
+        return str(folder).encode()
+
+    @contextlib.contextmanager
+    def open(self, mark):
+        root = Path(mark.decode())
+        if self.revoked or not root.is_dir():
+            yield None
+            return
+        self.opened += 1
+        yield root, None
+
+
+def sandboxed(tmp_path, monkeypatch, *names):
+    vols = drives(tmp_path, *names)
+    monkeypatch.setattr(desktop_api, "mounted_volumes", lambda: vols)
+    data = tmp_path / "data"
+    data.mkdir()
+    marks = FakeBookmarks()
+    return DesktopApi(tmp_path, "http://127.0.0.1:1", data, bookmarks=marks), marks, vols, data
+
+
+def test_in_the_sandbox_a_drive_not_yet_picked_needs_permission_and_is_never_read(tmp_path, monkeypatch):
+    api, marks, vols, data = sandboxed(tmp_path, monkeypatch, "Quad Stick")
+    (vols[0][1] / "default.csv").write_bytes(b"QuadStick,a\r\n")
+    assert api.quadstick_drive() == {"found": False, "name": "Quad Stick", "files": [],
+                                     "needs_permission": True}
+    assert api.read_quadstick_drive() is None          # the page then asks for the drive
+    with pytest.raises(desktop_api.NotWritten, match="pick Quad Stick once"):
+        api.write_quadstick_drive([{"name": "a.csv", "data": base64.b64encode(b"QuadStick").decode()}])
+    assert (vols[0][1] / "default.csv").read_bytes() == b"QuadStick,a\r\n"
+    assert not (data / "drive.json").exists()
+
+
+def test_in_the_sandbox_picking_the_drive_once_keeps_a_bookmark_that_opens_it_again(tmp_path, monkeypatch):
+    api, marks, vols, data = sandboxed(tmp_path, monkeypatch, "Quad Stick")
+    root = vols[0][1]
+    (root / "default.csv").write_bytes(b"a")
+    asked = {}
+
+    class Window:
+        def create_file_dialog(self, kind, directory=""):
+            asked["directory"] = directory
+            return [str(root)]
+    monkeypatch.setitem(sys.modules, "webview", type(sys)("webview"))
+    sys.modules["webview"].windows = [Window()]
+    sys.modules["webview"].FileDialog = type("FD", (), {"FOLDER": 20})
+
+    state = api.choose_quadstick_drive()
+    assert asked["directory"] == str(root)              # opens on the drive: Open is enough
+    assert state == {"found": True, "name": "Quad Stick", "files": [{"path": "default.csv", "size": 1}]}
+    saved = json.loads((data / "drive.json").read_text())
+    assert saved["name"] == "Quad Stick" and base64.b64decode(saved["bookmark"]) == str(root).encode()
+
+    # A later launch: a new shell finds it through the bookmark, with no dialog.
+    again = DesktopApi(tmp_path, "http://127.0.0.1:1", data, bookmarks=marks)
+    assert as_dict(again.read_quadstick_drive()) == {"default.csv": b"a"}
+
+    # Unplugged: not found, and the bookmark is kept for when it comes back.
+    monkeypatch.setattr(desktop_api, "mounted_volumes", lambda: [])
+    (root / "default.csv").unlink()
+    root.rmdir()
+    assert again.quadstick_drive() == {"found": False, "name": "Quad Stick", "files": []}
+    assert "bookmark" in json.loads((data / "drive.json").read_text())
+
+
+def test_in_the_sandbox_a_bookmark_macos_no_longer_honours_asks_again(tmp_path, monkeypatch):
+    api, marks, vols, data = sandboxed(tmp_path, monkeypatch, "Quad Stick")
+    (data / "drive.json").write_text(json.dumps(
+        {"name": "Quad Stick", "bookmark": base64.b64encode(str(vols[0][1]).encode()).decode()}))
+    assert api.quadstick_drive()["found"] is True
+    marks.revoked = True
+    assert api.quadstick_drive().get("needs_permission") is True
+
+
+def test_a_broken_drive_json_is_ignored_not_fatal(tmp_path, monkeypatch):
+    api, marks, vols, data = sandboxed(tmp_path, monkeypatch, "Quad Stick")
+    for junk in ("[1, 2]", "not json", json.dumps({"name": "Quad Stick", "bookmark": "%%%"})):
+        (data / "drive.json").write_text(junk)
+        assert api.quadstick_drive().get("needs_permission") is True

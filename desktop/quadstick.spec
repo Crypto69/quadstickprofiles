@@ -70,6 +70,11 @@ exe = EXE(
 )
 coll = COLLECT(exe, a.binaries, a.datas, strip=False, upx=False, name=NAME)
 
+# CFBundleVersion is the build number the Mac App Store wants to grow with every
+# upload of a version; build_mas.sh passes the commit count. Otherwise the version.
+import os
+BUILD_NUMBER = os.environ.get("QS_BUILD_NUMBER") or APP_VERSION
+
 if sys.platform == "darwin":
     app = BUNDLE(
         coll,
@@ -80,5 +85,11 @@ if sys.platform == "darwin":
             "NSHighResolutionCapable": True,
             "LSMinimumSystemVersion": "12.0",
             "CFBundleShortVersionString": APP_VERSION,
+            "CFBundleVersion": BUILD_NUMBER,
+            # App Store Connect refuses a Mac build without a category, and asks about
+            # encryption on every upload unless this says there is none (there is
+            # none: the app talks only to itself over plain http on 127.0.0.1).
+            "LSApplicationCategoryType": "public.app-category.utilities",
+            "ITSAppUsesNonExemptEncryption": False,
         },
     )

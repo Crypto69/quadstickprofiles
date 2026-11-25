@@ -31,6 +31,11 @@ export interface DriveState {
   /** The drive's name; not found, the name being looked for. */
   name: string
   files: { path: string; size: number }[]
+  /**
+   * Mac App Store build only: the drive is plugged in, but Apple's sandbox lets the app
+   * open it only after it has been picked once in the folder dialog.
+   */
+  needs_permission?: boolean
 }
 
 declare global {

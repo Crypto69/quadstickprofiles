@@ -22,6 +22,8 @@ export const useDriveStore = defineStore('drive', () => {
   /** This copy can look at the drive itself. */
   const live = computed(() => Boolean(desktopApi()?.quadstick_drive))
   const found = computed(() => state.value?.found === true)
+  /** Plugged in, but the sandboxed Mac app may not open it until it is picked once. */
+  const needsPermission = computed(() => state.value?.needs_permission === true)
 
   let asking = false
 
@@ -66,5 +68,5 @@ export const useDriveStore = defineStore('drive', () => {
     error.value = ''
   }
 
-  return { state, error, live, found, writable, refresh, choose, read, write }
+  return { state, error, live, found, needsPermission, writable, refresh, choose, read, write }
 })
