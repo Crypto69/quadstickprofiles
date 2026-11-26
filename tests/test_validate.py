@@ -489,3 +489,22 @@ def test_gamepad_outputs_off_usb_are_not_warned():
     c = cfg(modes=[mode(rows=[row(output="cross", inputs=["lip"]),
                               row(output="increment_mode", inputs=["right_sip"])], channel="bluetooth")])
     assert not [x for x in validate(c) if "reach the cable" in x[3]]
+
+
+# ---------------------------------------------------------------- rule 16, mapped twice
+def test_press_and_force_off_on_one_input_is_not_a_duplicate():
+    """Puff walks while held and cancels the sip's auto-walk latch (the GTA VI file)."""
+    rows = [row(output="left_joy_up", function="delayed_latch", params=[450], inputs=["mp_right_sip"]),
+            row(output="left_joy_up", inputs=["mp_center_puff"]),
+            row(output="left_joy_up", function="force_off", inputs=["mp_center_puff"]),
+            row(output="increment_mode", inputs=["right_sip"])]
+    assert not [x for x in validate(cfg(rows=rows)) if "mapped twice" in x[3]]
+
+
+def test_two_presses_on_one_input_are_still_a_duplicate():
+    rows = [row(output="cross", inputs=["lip"]),
+            row(output="cross", function="toggle", inputs=["lip"]),
+            row(output="cross", function="force_off", inputs=["lip"]),
+            row(output="increment_mode", inputs=["right_sip"])]
+    hits = [x for x in warnings(validate(cfg(rows=rows))) if "mapped twice" in x[3]]
+    assert len(hits) == 1 and "rows 4, 5" in hits[0][3]

@@ -119,9 +119,13 @@ const notes = computed(() => findings.value.filter((f) => f.severity === 'info')
 /**
  * What the strip is called. Once every error and warning is gone, what is left
  * is only information, and calling it "Problems" told the owner there was still
- * something to fix.
+ * something to fix. Likewise only an error is a problem — it blocks the export —
+ * so a profile with warnings alone, which still loads, says "Warnings".
  */
-const panelTitle = computed(() => (toFix.value.length ? 'Problems' : 'Nothing to fix'))
+const panelTitle = computed(() => {
+  if (toFix.value.some((f) => f.severity === 'error')) return 'Problems'
+  return toFix.value.length ? 'Warnings' : 'Nothing to fix'
+})
 
 /**
  * The emulation mode is the file's own `enable_DS3_emulation` preference row.

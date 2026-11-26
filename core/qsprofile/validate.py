@@ -116,7 +116,7 @@ def validate(cfg, problems=None, firmware=None):
             err(n, None, f"This mode ({mode.name}) has {slots} rows; the firmware reads at most "
                          f"{MAX_ROWS_PER_MODE} per mode")
         by_input = defaultdict(list)       # input -> [(output, row)]
-        seen_pairs = defaultdict(list)     # (input, output) -> rows
+        seen_pairs = defaultdict(list)     # (input, output) -> rows that press (not force_off)
         overrides = {}                     # per-mode preference rows: key -> (value, row)
         exits = False
         for m in mode.mappings:
@@ -183,7 +183,12 @@ def validate(cfg, problems=None, firmware=None):
                 info(n, m.row, f"Row {m.row} is a sequence: {' then '.join(m.inputs)} (performed in that order) → {m.output}")
             if m.inputs:
                 by_input[m.inputs[0]].append((m.output, m.row))
-                seen_pairs[(m.inputs[0], m.output)].append(m.row)
+                # A force_off row on a pair that also presses is the press-and-cancel
+                # idiom (puff walks while held and releases the sip's auto-walk latch):
+                # 1,908 of 2,312 "duplicates" in the community corpus were this. Only
+                # rows that press can clash, so only they count towards rule 16.
+                if m.function != "force_off":
+                    seen_pairs[(m.inputs[0], m.output)].append(m.row)
                 if m.output in MODE_CHANGE_OUTPUTS:
                     exits = True
         # override rows that only make sense together (threshold ordering)

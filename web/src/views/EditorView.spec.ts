@@ -100,9 +100,18 @@ describe('EditorView', () => {
     w.unmount()
   })
 
-  it('keeps calling the strip Problems while a warning remains', async () => {
+  it('calls the strip Warnings when warnings are the worst left', async () => {
     const { w } = await page({
       'POST /api/profiles/validate': validation({ warnings: 1, findings: [WARN] }),
+    })
+    expect(w.find('.problems-strip h2').text()).toBe('Warnings')
+    w.unmount()
+  })
+
+  it('calls the strip Problems while an error blocks the export', async () => {
+    const ERR = { ...WARN, severity: 'error' as const, message: 'Unknown output' }
+    const { w } = await page({
+      'POST /api/profiles/validate': validation({ errors: 1, warnings: 1, findings: [ERR, WARN] }),
     })
     expect(w.find('.problems-strip h2').text()).toBe('Problems')
     w.unmount()
