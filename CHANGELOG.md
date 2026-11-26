@@ -3,6 +3,23 @@
 Each release, in plain words. The newest is first. The part for a version is also
 shown at the top of its page on GitHub.
 
+## 1.27 — 26 November 2026
+
+### Fewer false alarms
+
+Some profiles use one puff for two jobs on the same button: hold it to walk, and it
+also stops auto-walk. That needs two rows: one that presses the button and one that
+turns it off (`force_off`). The app used to call this "mapped twice". It is not a
+mistake, and the app no longer warns about it.
+
+A profile that has two rows really pressing the same button on the same input is
+still pointed out.
+
+### "Warnings", not "Problems"
+
+The box under the editor now says **Warnings** when the profile will still load and
+export. It says **Problems** only when something must be fixed before you can export.
+
 ## 1.26 — 25 November 2026
 
 ### Coming to the Mac App Store
